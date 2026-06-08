@@ -1,0 +1,338 @@
+{
+  "builtTestProducts" : [
+
+  ],
+  "copyCommands" : {
+
+  },
+  "explicitTargetDependencyImportCheckingMode" : {
+    "none" : {
+
+    }
+  },
+  "generatedSourceTargetSet" : [
+
+  ],
+  "pluginDescriptions" : [
+
+  ],
+  "swiftCommands" : {
+    "C.NoBarrierMouse-x86_64-apple-macosx-release.module" : {
+      "executable" : "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "fileList" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/sources",
+      "importPath" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/Modules",
+      "inputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppDelegate.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppRole.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/EventTap.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/PeerNetwork.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/Protocol.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RemoteInput.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RoleSelectionController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/main.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/sources"
+        }
+      ],
+      "isLibrary" : false,
+      "moduleName" : "NoBarrierMouse",
+      "moduleOutputPath" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/NoBarrierMouse.swiftmodule",
+      "objects" : [
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/AppDelegate.swift.o",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/AppRole.swift.o",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/EventTap.swift.o",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/PeerNetwork.swift.o",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/Protocol.swift.o",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/RemoteInput.swift.o",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/RoleSelectionController.swift.o",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/main.swift.o"
+      ],
+      "otherArguments" : [
+        "-target",
+        "x86_64-apple-macosx10.15",
+        "-whole-module-optimization",
+        "-num-threads",
+        "8",
+        "-serialize-diagnostics",
+        "-O",
+        "-j8",
+        "-DSWIFT_PACKAGE",
+        "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+        "-module-cache-path",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/ModuleCache",
+        "-parseable-output",
+        "-swift-version",
+        "5",
+        "-I",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-L",
+        "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+        "-plugin-path",
+        "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+        "-sdk",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-g",
+        "-Xcc",
+        "-isysroot",
+        "-Xcc",
+        "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+        "-Xcc",
+        "-fPIC",
+        "-Xcc",
+        "-g"
+      ],
+      "outputFileMapPath" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/output-file-map.json",
+      "outputs" : [
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/AppDelegate.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/AppRole.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/EventTap.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/PeerNetwork.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/Protocol.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/RemoteInput.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/RoleSelectionController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/main.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/NoBarrierMouse.swiftmodule"
+        }
+      ],
+      "prepareForIndexing" : false,
+      "sources" : [
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppDelegate.swift",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppRole.swift",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/EventTap.swift",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/PeerNetwork.swift",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/Protocol.swift",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RemoteInput.swift",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RoleSelectionController.swift",
+        "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/main.swift"
+      ],
+      "tempsPath" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build",
+      "wholeModuleOptimization" : true
+    }
+  },
+  "swiftFrontendCommands" : {
+
+  },
+  "swiftTargetScanArgs" : {
+    "NoBarrierMouse" : [
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc",
+      "-module-name",
+      "NoBarrierMouse",
+      "-c",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppDelegate.swift",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppRole.swift",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/EventTap.swift",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/PeerNetwork.swift",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/Protocol.swift",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RemoteInput.swift",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RoleSelectionController.swift",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/main.swift",
+      "-I",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/Modules",
+      "-target",
+      "x86_64-apple-macosx10.15",
+      "-whole-module-optimization",
+      "-num-threads",
+      "8",
+      "-serialize-diagnostics",
+      "-O",
+      "-j8",
+      "-DSWIFT_PACKAGE",
+      "-DSWIFT_MODULE_RESOURCE_BUNDLE_UNAVAILABLE",
+      "-module-cache-path",
+      "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/ModuleCache",
+      "-parseable-output",
+      "-swift-version",
+      "5",
+      "-I",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-L",
+      "/Library/Developer/CommandLineTools/Library/Developer/Frameworks",
+      "-plugin-path",
+      "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing",
+      "-sdk",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-g",
+      "-Xcc",
+      "-isysroot",
+      "-Xcc",
+      "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk",
+      "-Xcc",
+      "-fPIC",
+      "-Xcc",
+      "-g",
+      "-driver-use-frontend-path",
+      "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+    ]
+  },
+  "targetDependencyMap" : {
+    "NoBarrierMouse" : [
+
+    ]
+  },
+  "testDiscoveryCommands" : {
+
+  },
+  "testEntryPointCommands" : {
+
+  },
+  "traitConfiguration" : {
+    "default" : {
+
+    }
+  },
+  "writeCommands" : {
+    "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/sources" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<sources-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppDelegate.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/AppRole.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/EventTap.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/PeerNetwork.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/Protocol.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RemoteInput.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/RoleSelectionController.swift"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/Sources/NoBarrierMouse/main.swift"
+        }
+      ],
+      "outputFilePath" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/sources"
+    },
+    "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.product/Objects.LinkFileList" : {
+      "alwaysOutOfDate" : false,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<link-file-list>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/AppDelegate.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/AppRole.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/EventTap.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/PeerNetwork.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/Protocol.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/RemoteInput.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/RoleSelectionController.swift.o"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.build/main.swift.o"
+        }
+      ],
+      "outputFilePath" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/NoBarrierMouse.product/Objects.LinkFileList"
+    },
+    "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt" : {
+      "alwaysOutOfDate" : true,
+      "inputs" : [
+        {
+          "kind" : "virtual",
+          "name" : "<swift-get-version>"
+        },
+        {
+          "kind" : "file",
+          "name" : "/Library/Developer/CommandLineTools/usr/bin/swiftc"
+        }
+      ],
+      "outputFilePath" : "/Users/erikmartin/Desktop/Proyectos/no-barrier-mouse/.build/x86_64-apple-macosx/release/swift-version--1AB21518FC5DEDBE.txt"
+    }
+  }
+}
