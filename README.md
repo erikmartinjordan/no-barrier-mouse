@@ -92,35 +92,6 @@ On each Mac:
 
 If clicks, scrolling, or keyboard input do not work on the receiver while the cursor still moves, the receiver app almost certainly needs Accessibility permission. Remove any old No Barrier Mouse entry from Privacy & Security, add the rebuilt app again, then reopen it.
 
-## Repository Hygiene
-
-Do not commit generated build artifacts.
-
-These should be ignored or removed from Git:
-
-- `.build/`
-- `.build-native/`
-- `.build-intel/`
-- `.DS_Store`
-- generated `.app` bundles
-
-The source files that should be committed are mainly:
-
-- `Package.swift`
-- `build-app.sh`
-- `README.md`
-- `.gitignore`
-- `.gitattributes`
-- `Sources/NoBarrierMouse/*.swift`
-
-If generated files were already committed, remove them from Git while keeping them locally:
-
-```sh
-git rm -r --cached .build .build-native .build-intel .DS_Store
-git add .gitignore README.md
-git commit -m "Clean generated files and update README"
-```
-
 ## Troubleshooting
 
 If both Macs stay on `Waiting for another device`:
