@@ -1,33 +1,51 @@
 # No Barrier Mouse
 
-No Barrier Mouse is a tiny macOS menu-bar utility that shares one keyboard and mouse between two Macs on the same local network.
+No Barrier Mouse is a tiny macOS menu-bar utility for sharing one keyboard and mouse between two Macs on the same local network.
 
-It is intentionally simple:
+It is currently designed for a simple two-Mac setup:
 
-- both Macs run the same app
-- the menu has `On` and `Quit`
-- after turning on the first Mac, the menu title changes to `Waiting for another device`
-- after turning on the second Mac, both menus change to `Connected`
-- move the mouse through the right edge of one Mac to control the other Mac
-- move the remote mouse to the left edge, or press `Esc`, to return control
+- one Mac runs as `Controller`
+- one Mac runs as `Receiver`
+- the controller sends mouse, click, scroll, and keyboard input to the receiver
+- moving through the controller's right edge enters the receiver
+- moving through the receiver's left edge returns control to the controller
+
+## Status
+
+This is an early working version, not a polished Barrier/Synergy replacement yet. It works best when both Macs are on the same fast local network, preferably Ethernet or strong Wi-Fi.
+
+Recent latency improvements include TCP no-delay, a user-interactive network queue, and faster mouse delta forwarding. There can still be some lag because motion is currently sent as JSON messages over TCP.
+
+## Requirements
+
+- macOS 10.15 or newer
+- Xcode Command Line Tools
+- two Macs on the same local network
+- Accessibility permission on both Macs
+- Local Network permission if macOS asks for it
 
 ## Build
 
-Install Xcode Command Line Tools, then run this in the project folder:
+Install Xcode Command Line Tools, then run:
 
 ```sh
 swift build
 ```
 
-To make a basic `.app` bundle:
+To build a native `.app` bundle:
 
 ```sh
 chmod +x build-app.sh
 ./build-app.sh
-open .build/release/NoBarrierMouse.app
 ```
 
-For the 2013 Intel iMac, you can build an Intel app from the MacBook:
+That creates:
+
+```text
+.build/release/NoBarrierMouse.app
+```
+
+To build an Intel app for an older iMac from an Apple Silicon Mac:
 
 ```sh
 ./build-app.sh intel
@@ -39,46 +57,96 @@ That creates:
 .build/release/NoBarrierMouse-Intel.app
 ```
 
-Copy that app to the iMac.
+Copy the native app to the Apple Silicon Mac and the Intel app to the Intel Mac.
 
-## Roles
+## Usage
 
-Run exactly one Mac as `Controller` and the other as `Receiver`.
+Run the app on both Macs.
 
-- `Controller`: the Mac with the real Bluetooth mouse and keyboard attached.
+Choose roles:
+
+- `Controller`: the Mac with the physical mouse and keyboard.
 - `Receiver`: the Mac you want to control remotely.
 
-When connected, move through the controller Mac's right screen edge to control the receiver. You can also press `Control + Option + Command + Right Arrow` on the controller to force entry. While remote control is active, keyboard events are sent to the receiver.
+When both apps connect, the menu-bar icon turns green and the menu says `Connected`.
 
-To return control, press `Esc`, move the receiver cursor to the left edge, or press `Control + Option + Command + Escape` on the controller.
+Controls:
+
+- Move through the controller Mac's right screen edge to enter the receiver.
+- Move through the receiver Mac's left screen edge to return to the controller.
+- Press `Esc` while controlling the receiver to return control.
+- Press `Control + Option + Command + Right Arrow` on the controller to force entry.
+- Press `Control + Option + Command + Escape` on the controller for emergency off.
 
 ## Permissions
 
-On both Macs, macOS must allow the app to control input:
+No Barrier Mouse needs Accessibility permission on both Macs.
 
-1. Open the app.
-2. Click the top-bar mouse-with-glasses icon.
-3. Choose `On`.
-4. When macOS asks, grant Accessibility permission.
-5. If needed, also allow Local Network access.
-6. Quit and reopen the app after changing permissions.
+On each Mac:
 
-Accessibility is required for capturing keyboard/mouse events and recreating them on the other Mac.
+1. Open No Barrier Mouse.
+2. Choose the correct role.
+3. If macOS asks, grant Accessibility permission.
+4. If macOS asks, allow Local Network access.
+5. If input does not work after changing permissions, quit and reopen the app.
 
-If both Macs stay on `Waiting for another device`, check these first:
+If clicks, scrolling, or keyboard input do not work on the receiver while the cursor still moves, the receiver app almost certainly needs Accessibility permission. Remove any old No Barrier Mouse entry from Privacy & Security, add the rebuilt app again, then reopen it.
 
-- both Macs are on the same Wi-Fi or Ethernet network
-- VPNs/firewalls are not blocking local network traffic
-- macOS Local Network permission is allowed for `NoBarrierMouse`
-- quit and reopen the app on both Macs after changing permissions
+## Repository Hygiene
+
+Do not commit generated build artifacts.
+
+These should be ignored or removed from Git:
+
+- `.build/`
+- `.build-native/`
+- `.build-intel/`
+- `.DS_Store`
+- generated `.app` bundles
+
+The source files that should be committed are mainly:
+
+- `Package.swift`
+- `build-app.sh`
+- `README.md`
+- `.gitignore`
+- `.gitattributes`
+- `Sources/NoBarrierMouse/*.swift`
+
+If generated files were already committed, remove them from Git while keeping them locally:
+
+```sh
+git rm -r --cached .build .build-native .build-intel .DS_Store
+git add .gitignore README.md
+git commit -m "Clean generated files and update README"
+```
+
+## Troubleshooting
+
+If both Macs stay on `Waiting for another device`:
+
+- make sure both Macs are on the same Wi-Fi or Ethernet network
+- allow Local Network access for No Barrier Mouse
+- check that VPNs or firewalls are not blocking local Bonjour/TCP traffic
+- quit and reopen the app on both Macs
+
+If the receiver cursor moves but clicks or scrolling do not work:
+
+- grant Accessibility permission on the receiver
+- remove old permission entries for previous app builds
+- reopen the app after changing permissions
+
+If the controller does not capture input:
+
+- grant Accessibility permission on the controller
+- choose `Controller` again from the menu-bar app
+- quit and reopen the app if macOS permissions were changed
 
 ## Current Limits
 
-This is a first working version, not a full Barrier replacement.
-
-- It uses Bonjour/local network discovery.
-- It is designed for two Macs.
-- The handoff edge is currently the right edge, and return is the remote left edge.
+- Designed for two Macs.
+- Uses Bonjour/local network discovery.
+- Uses JSON-over-TCP for input messages, so some latency is still expected.
 - Clipboard sharing is not implemented.
+- Display layout is fixed: controller exits right, receiver returns left.
 - The app is unsigned, so macOS may require right-click `Open` the first time.
-- Both Macs must have Accessibility permission. The controller needs it to capture/suppress local input; the receiver needs it to recreate mouse and keyboard events.
