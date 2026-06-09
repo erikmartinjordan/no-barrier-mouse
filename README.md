@@ -1,6 +1,16 @@
 # No Barrier Mouse
 
-![No Barrier Mouse icon](assets/icon.png)
+<p align="center">
+  <img src="assets/icon.png" alt="No Barrier Mouse icon" width="128" height="128" />
+</p>
+
+<p align="center">
+  <strong>One mouse. Two Macs. No barrier.</strong>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/downloads/erikmartinjordan/no-barrier-mouse/total?label=Total%20downloads&style=flat-square" alt="Total downloads" />
+</p>
 
 A tiny macOS menu-bar app for sharing one mouse and keyboard between two Macs on the same local network.
 
@@ -43,9 +53,17 @@ The app bundles are created in:
 
 If the cursor moves but clicks or scrolling do not work, remove the old No Barrier Mouse entry from Privacy & Security, add the current app again, then reopen it.
 
-## Release
+## Release Strategy
 
-GitHub Actions publishes releases when a tag like `v0.0.1` is pushed, or when the `Release` workflow is run manually.
+No Barrier Mouse uses Release Please with Conventional Commits for official GitHub Releases.
+
+Use commit messages like:
+
+- `feat: add clipboard sharing`
+- `fix: reduce cursor delay`
+- `docs: update install notes`
+
+After changes land on `main`, Release Please opens or updates a release PR. Merge that PR when you are ready to publish. The release workflow then creates the GitHub Release and uploads the app bundles.
 
 Each release contains only:
 

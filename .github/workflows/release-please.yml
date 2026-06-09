@@ -1,0 +1,124 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing release tag to build/upload assets for, for example v0.0.1"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - name: Release Please
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-release-assets:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true' || inputs.release_tag != ''
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || needs.release-please.outputs.tag_name }}
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          TAG="${{ inputs.release_tag || needs.release-please.outputs.tag_name }}"
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build app bundles
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          ./build-app.sh
+          ./build-app.sh intel
+
+      - name: Package release assets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            .build/release/NoBarrierMouse.app \
+            "NoBarrierMouse-${VERSION}-macOS.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            .build/release/NoBarrierMouse-Intel.app \
+            "NoBarrierMouse-${VERSION}-macOS-Intel.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: no-barrier-mouse-macos
+          path: |
+            NoBarrierMouse-${{ steps.version.outputs.version }}-macOS.zip
+            NoBarrierMouse-${{ steps.version.outputs.version }}-macOS-Intel.zip
+          if-no-files-found: error
+
+  upload-release-assets:
+    needs:
+      - release-please
+      - build-release-assets
+    if: always() && (needs.release-please.outputs.release_created == 'true' || inputs.release_tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release
+          merge-multiple: true
+
+      - name: Format release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag || needs.release-please.outputs.tag_name }}
+        run: |
+          marker="<!-- no-barrier-mouse-release-logo -->"
+          icon_url="https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/assets/icon.png"
+          body="$(gh release view "$TAG" --json body -q .body --repo "${{ github.repository }}")"
+
+          if printf '%s' "$body" | grep -q "$marker"; then
+            printf '%s\n' "$body" > /tmp/no-barrier-mouse-release-notes.md
+          else
+            {
+              printf '%s\n' "$marker"
+              printf '![No Barrier Mouse icon](%s)\n\n' "$icon_url"
+              printf '%s\n' "$body"
+            } > /tmp/no-barrier-mouse-release-notes.md
+          fi
+
+          gh release edit "$TAG" --notes-file /tmp/no-barrier-mouse-release-notes.md --repo "${{ github.repository }}"
+
+      - name: Upload app bundles to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.release_tag || needs.release-please.outputs.tag_name }}
+        run: |
+          ls -lh release/
+          test "$(find release -type f -name '*.zip' | wc -l)" -eq 2
+          gh release upload "$TAG" release/*.zip --repo "${{ github.repository }}" --clobber
