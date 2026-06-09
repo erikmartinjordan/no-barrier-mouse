@@ -146,13 +146,30 @@ jobs:
           marker="<!-- no-barrier-mouse-release-logo -->"
           icon_url="https://raw.githubusercontent.com/${{ github.repository }}/${TAG}/assets/icon.png"
           body="$(gh release view "$TAG" --json body -q .body --repo "${{ github.repository }}")"
+          icon_block="$(printf '%s\n%s\n%s' \
+            '<p align="center">' \
+            "  <img src=\"${icon_url}\" alt=\"No Barrier Mouse icon\" width=\"128\" height=\"128\" />" \
+            '</p>')"
 
           if printf '%s' "$body" | grep -q "$marker"; then
-            printf '%s\n' "$body" > /tmp/no-barrier-mouse-release-notes.md
+            BODY="$body" ICON_BLOCK="$icon_block" python3 - <<'PY' > /tmp/no-barrier-mouse-release-notes.md
+          import os
+          import re
+
+          body = os.environ["BODY"]
+          icon_block = os.environ["ICON_BLOCK"]
+          marker = "<!-- no-barrier-mouse-release-logo -->"
+          pattern = re.compile(
+              re.escape(marker)
+              + r"\s*(?:<p align=\"center\">\s*<img[^>]+No Barrier Mouse icon[^>]+>\s*</p>|!\[No Barrier Mouse icon\]\([^)]+\))",
+              re.MULTILINE,
+          )
+          print(pattern.sub(marker + "\n" + icon_block, body), end="")
+          PY
           else
             {
               printf '%s\n' "$marker"
-              printf '![No Barrier Mouse icon](%s)\n\n' "$icon_url"
+              printf '%s\n\n' "$icon_block"
               printf '%s\n' "$body"
             } > /tmp/no-barrier-mouse-release-notes.md
           fi
