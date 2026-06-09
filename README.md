@@ -1,5 +1,7 @@
 # No Barrier Mouse
 
+![icon](assets/icon.png)
+
 No Barrier Mouse is a tiny macOS menu-bar utility for sharing one keyboard and mouse between two Macs on the same local network.
 
 It is currently designed for a simple two-Mac setup:
@@ -108,10 +110,12 @@ The source files that should be committed are mainly:
 
 - `Package.swift`
 - `build-app.sh`
+- `genicon.sh`
 - `README.md`
 - `.gitignore`
 - `.gitattributes`
 - `Sources/NoBarrierMouse/*.swift`
+- `assets/icon.png`
 
 If generated files were already committed, remove them from Git while keeping them locally:
 

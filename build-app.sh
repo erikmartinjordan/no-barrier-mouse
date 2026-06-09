@@ -28,6 +28,15 @@ rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$BUILD_DIR/NoBarrierMouse" "$MACOS/NoBarrierMouse"
 
+# Generate icon if needed
+ICON_SRC=".build/icon/NoBarrierMouse.icns"
+if [ ! -f "$ICON_SRC" ]; then
+  echo "  Generating icon..."
+  mkdir -p .build/icon
+  "$PWD/genicon.sh" .build/icon
+fi
+cp "$ICON_SRC" "$RESOURCES/NoBarrierMouse.icns"
+
 cat > "$CONTENTS/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -48,6 +57,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <string>0.1.0</string>
   <key>CFBundleVersion</key>
   <string>1</string>
+  <key>CFBundleIconFile</key>
+  <string>NoBarrierMouse</string>
   <key>LSUIElement</key>
   <true/>
   <key>NSLocalNetworkUsageDescription</key>
