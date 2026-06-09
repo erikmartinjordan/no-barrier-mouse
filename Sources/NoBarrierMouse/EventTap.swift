@@ -165,10 +165,28 @@ final class EventTap {
     }
 
     private func flushDelta() {
+        scheduledDeltaFlush?.cancel()
+        scheduledDeltaFlush = nil
+        sendPendingDelta()
+    }
+
+    private func sendPendingDelta() {
         if pendingDelta.x != 0 || pendingDelta.y != 0 {
             send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
             pendingDelta = .zero
+            lastDeltaSend = Date()
         }
+    }
+
+    private func scheduleDeltaFlush(after delay: TimeInterval) {
+        guard scheduledDeltaFlush == nil else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.scheduledDeltaFlush = nil
+            self?.sendPendingDelta()
+        }
+        scheduledDeltaFlush = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
     }
 
     private func isKeyboardEnterRemote(type: CGEventType, event: CGEvent) -> Bool {
@@ -187,7 +205,8 @@ final class EventTap {
 
     private var pendingDelta = CGPoint.zero
     private var lastDeltaSend = Date.distantPast
-    private let deltaThrottle: TimeInterval = 1.0 / 240.0
+    private var scheduledDeltaFlush: DispatchWorkItem?
+    private let deltaThrottle: TimeInterval = 1.0 / 500.0
 
     private func forward(type: CGEventType, event: CGEvent) {
         switch type {
@@ -197,10 +216,13 @@ final class EventTap {
             pendingDelta.x += dx
             pendingDelta.y += dy
             let now = Date()
-            if now.timeIntervalSince(lastDeltaSend) >= deltaThrottle {
-                send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
-                pendingDelta = .zero
-                lastDeltaSend = now
+            let elapsed = now.timeIntervalSince(lastDeltaSend)
+            if elapsed >= deltaThrottle {
+                scheduledDeltaFlush?.cancel()
+                scheduledDeltaFlush = nil
+                sendPendingDelta()
+            } else {
+                scheduleDeltaFlush(after: deltaThrottle - elapsed)
             }
             pinLocalCursor()
         case .leftMouseDown:

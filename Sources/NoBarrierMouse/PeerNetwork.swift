@@ -140,6 +140,7 @@ final class PeerNetwork {
 
         let params = NWParameters(tls: nil, tcp: tcpOptions)
         params.includePeerToPeer = true
+        params.serviceClass = .interactiveVideo
         return params
     }
 }
