@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version"
+        required: true
+        default: "0.0.1"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish macOS apps
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+            TAG="v$VERSION"
+          else
+            TAG="${GITHUB_REF_NAME}"
+            VERSION="${TAG#v}"
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag for manual release
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git fetch --tags origin
+
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+      - name: Build app bundles
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          ./build-app.sh
+          ./build-app.sh intel
+
+      - name: Package release assets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent \
+            .build/release/NoBarrierMouse.app \
+            "NoBarrierMouse-${VERSION}-macOS.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent \
+            .build/release/NoBarrierMouse-Intel.app \
+            "NoBarrierMouse-${VERSION}-macOS-Intel.zip"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --yes
+          fi
+
+          gh release create "$TAG" \
+            "NoBarrierMouse-${VERSION}-macOS.zip" \
+            "NoBarrierMouse-${VERSION}-macOS-Intel.zip" \
+            --title "No Barrier Mouse ${VERSION}" \
+            --notes "First public release with native macOS and Intel macOS app bundles."

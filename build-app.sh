@@ -2,6 +2,14 @@
 set -eu
 
 ARCH="${1:-native}"
+VERSION="${VERSION:-0.0.1}"
+BUILD_NUMBER="${BUILD_NUMBER:-1}"
+ICON_SRC="assets/NoBarrierMouse.icns"
+
+if [ ! -f "$ICON_SRC" ]; then
+  echo "Missing $ICON_SRC" >&2
+  exit 1
+fi
 
 if [ "$ARCH" = "intel" ]; then
   SCRATCH=".build-intel"
@@ -27,17 +35,9 @@ RESOURCES="$CONTENTS/Resources"
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RESOURCES"
 cp "$BUILD_DIR/NoBarrierMouse" "$MACOS/NoBarrierMouse"
-
-# Generate icon if needed
-ICON_SRC=".build/icon/NoBarrierMouse.icns"
-if [ ! -f "$ICON_SRC" ]; then
-  echo "  Generating icon..."
-  mkdir -p .build/icon
-  "$PWD/genicon.sh" .build/icon
-fi
 cp "$ICON_SRC" "$RESOURCES/NoBarrierMouse.icns"
 
-cat > "$CONTENTS/Info.plist" <<'PLIST'
+cat > "$CONTENTS/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -54,9 +54,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>$VERSION</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>$BUILD_NUMBER</string>
   <key>CFBundleIconFile</key>
   <string>NoBarrierMouse</string>
   <key>LSUIElement</key>
