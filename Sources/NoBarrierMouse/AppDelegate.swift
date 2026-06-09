@@ -5,8 +5,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
     private let statusLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let powerItem = NSMenuItem(title: "Enabled", action: #selector(togglePower), keyEquivalent: "")
     private let chooseRoleItem = NSMenuItem(title: "Choose Role...", action: #selector(chooseRole), keyEquivalent: "")
-    private let turnOffItem = NSMenuItem(title: "Turn Off", action: #selector(turnOff), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
     private let network = PeerNetwork()
     private let eventTap = EventTap()
@@ -54,13 +54,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
 
         statusLabel.isEnabled = false
+        powerItem.target = self
         chooseRoleItem.target = self
-        turnOffItem.target = self
         quitItem.target = self
         menu.addItem(statusLabel)
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(powerItem)
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(chooseRoleItem)
-        menu.addItem(turnOffItem)
         menu.addItem(NSMenuItem.separator())
         let accItem = NSMenuItem(title: "Grant Accessibility...", action: #selector(grantAccessibility), keyEquivalent: "")
         accItem.target = self
@@ -110,6 +111,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func chooseRole() {
         roleSelectionController.show { [weak self] role in
             self?.turnOn(role: role)
+        }
+    }
+
+    @objc private func togglePower() {
+        if isOn {
+            turnOff()
+        } else {
+            chooseRole()
         }
     }
 
@@ -200,8 +209,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         statusLabel.title = label
+        powerItem.state = isOn ? .on : .off
         chooseRoleItem.title = isOn ? "Change Role..." : "Choose Role..."
-        turnOffItem.isEnabled = isOn
         accessibilityItem?.isHidden = !accessibilityProblem
 
     }

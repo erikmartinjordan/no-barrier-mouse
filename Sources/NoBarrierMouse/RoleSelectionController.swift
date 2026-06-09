@@ -211,28 +211,53 @@ enum ControllerIcon {
         let image = NSImage(size: size)
         image.lockFocus()
 
-        NSColor.labelColor.setStroke()
+        let stroke = NSColor.labelColor
+        let fill = NSColor.labelColor.withAlphaComponent(0.18)
+        let keyFill = NSColor.labelColor.withAlphaComponent(0.72)
 
-        let body = NSBezierPath(roundedRect: NSRect(x: 2, y: 3, width: 40, height: 22), xRadius: 4, yRadius: 4)
-        body.lineWidth = 1.5
+        fill.setFill()
+        stroke.setStroke()
+
+        let body = NSBezierPath(roundedRect: NSRect(x: 2.5, y: 4, width: 39, height: 21), xRadius: 4.5, yRadius: 4.5)
+        body.fill()
+        body.lineWidth = 1.4
         body.stroke()
 
-        for row in 0..<3 {
-            let y: CGFloat = [19, 14, 8][row]
-            let count = [6, 5, 1][row]
-            let startX: CGFloat = [5, 7, 12][row]
-            let spacing: CGFloat = [6.2, 6.2, 18][row]
-            let keyW: CGFloat = [4.5, 4.5, 16][row]
-            for i in 0..<count {
-                let key = NSBezierPath(roundedRect: NSRect(x: startX + CGFloat(i) * spacing, y: y, width: keyW, height: 4), xRadius: 1, yRadius: 1)
-                key.lineWidth = 1
-                key.stroke()
-            }
-        }
+        let topLip = NSBezierPath()
+        topLip.move(to: NSPoint(x: 8, y: 22))
+        topLip.line(to: NSPoint(x: 36, y: 22))
+        topLip.lineWidth = 1.1
+        topLip.lineCapStyle = .round
+        topLip.stroke()
+
+        keyFill.setFill()
+        drawKeyRow(count: 6, y: 17.1, keyWidth: 3.8, keyHeight: 3.1, gap: 2.0)
+        drawKeyRow(count: 6, y: 12.4, keyWidth: 3.8, keyHeight: 3.1, gap: 2.0)
+        drawKey(x: 5.9, y: 7.7, width: 4.4)
+        drawKey(x: 12.3, y: 7.7, width: 19.4)
+        drawKey(x: 33.7, y: 7.7, width: 4.4)
 
         image.unlockFocus()
         image.isTemplate = true
         return image
+    }
+
+    private static func drawKeyRow(count: Int, y: CGFloat, keyWidth: CGFloat, keyHeight: CGFloat, gap: CGFloat) {
+        let totalWidth = CGFloat(count) * keyWidth + CGFloat(count - 1) * gap
+        let startX = (44 - totalWidth) / 2
+
+        for index in 0..<count {
+            drawKey(
+                x: startX + CGFloat(index) * (keyWidth + gap),
+                y: y,
+                width: keyWidth,
+                height: keyHeight
+            )
+        }
+    }
+
+    private static func drawKey(x: CGFloat, y: CGFloat, width: CGFloat, height: CGFloat = 3.1) {
+        NSBezierPath(roundedRect: NSRect(x: x, y: y, width: width, height: height), xRadius: 1.1, yRadius: 1.1).fill()
     }
 }
 
