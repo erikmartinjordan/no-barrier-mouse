@@ -67,8 +67,8 @@ After changes land on `main`, Release Please opens or updates a release PR. Merg
 
 Each release contains only:
 
-- `NoBarrierMouse-0.0.1-macOS.zip`
-- `NoBarrierMouse-0.0.1-macOS-Intel.zip`
+- `NoBarrierMouse-X.X.X-macOS.zip`
+- `NoBarrierMouse-X.X.X-macOS-Intel.zip`
 
 ## Notes
 
