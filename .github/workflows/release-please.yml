@@ -34,10 +34,10 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout release tag
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.release_tag || needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
 
       - name: Resolve version
         id: version
@@ -47,6 +47,24 @@ jobs:
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout release tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if [ -z "$TAG" ]; then
+            echo "No release tag was provided or created."
+            exit 1
+          fi
+
+          git fetch --force --tags origin "refs/tags/${TAG}:refs/tags/${TAG}" || git fetch --force --tags origin
+
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            echo "Release tag ${TAG} does not exist. If running manually, create the release/tag first or use an existing tag."
+            exit 1
+          fi
+
+          git checkout --detach "$TAG"
 
       - name: Build app bundles
         env:
