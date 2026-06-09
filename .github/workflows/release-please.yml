@@ -44,9 +44,36 @@ jobs:
         shell: bash
         run: |
           TAG="${{ inputs.release_tag || needs.release-please.outputs.tag_name }}"
+          if [ -n "$TAG" ] && [ "${TAG#v}" = "$TAG" ]; then
+            TAG="v$TAG"
+          fi
+
           VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure manual release tag exists
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --force --tags origin
+
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+          if ! gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "${{ github.repository }}" \
+              --title "No Barrier Mouse ${VERSION}" \
+              --notes "Manual release for No Barrier Mouse ${VERSION}."
+          fi
 
       - name: Checkout release tag
         env:
