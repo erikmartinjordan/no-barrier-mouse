@@ -71,4 +71,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
+if command -v codesign >/dev/null 2>&1; then
+  codesign --force --deep --sign - "$APP"
+fi
+
 echo "$APP"

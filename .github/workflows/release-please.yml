@@ -76,6 +76,7 @@ jobs:
           fi
 
       - name: Checkout release tag
+        if: github.event_name != 'workflow_dispatch' || inputs.release_tag == ''
         env:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
