@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isOn = false
     private var role: AppRole?
     private var accessibilityProblem = false
+    private var inputMonitoringProblem = false
     private var state: ConnectionState = .off {
         didSet { updateAppearance() }
     }
@@ -42,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var accessibilityItem: NSMenuItem?
+    private var inputMonitoringItem: NSMenuItem?
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: 24)
@@ -67,6 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accItem.target = self
         menu.addItem(accItem)
         accessibilityItem = accItem
+        let inputItem = NSMenuItem(title: "Grant Input Monitoring...", action: #selector(grantInputMonitoring), keyEquivalent: "")
+        inputItem.target = self
+        menu.addItem(inputItem)
+        inputMonitoringItem = inputItem
         menu.addItem(NSMenuItem.separator())
         menu.addItem(quitItem)
         statusItem.menu = menu
@@ -137,12 +143,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isOn = true
         accessibilityProblem = !requestAccessibilityIfNeeded(prompt: true)
         if role == .controller {
+            inputMonitoringProblem = !requestInputMonitoringIfNeeded(prompt: true)
             if !eventTap.start() {
                 accessibilityProblem = true
                 startAccessibilityTimer()
             }
         }
-        if accessibilityProblem {
+        if accessibilityProblem || inputMonitoringProblem {
             startAccessibilityTimer()
         }
         network.start(role: role)
@@ -156,20 +163,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         role = nil
         isOn = false
         accessibilityProblem = false
+        inputMonitoringProblem = false
         state = .off
     }
 
     private func startAccessibilityTimer() {
         stopAccessibilityTimer()
         accessibilityTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
-            guard let self = self, self.accessibilityProblem else { return }
-            guard AXIsProcessTrusted() else { return }
-            self.accessibilityProblem = false
+            guard let self = self, self.accessibilityProblem || self.inputMonitoringProblem else { return }
+            if self.accessibilityProblem, AXIsProcessTrusted() {
+                self.accessibilityProblem = false
+            }
+            if self.inputMonitoringProblem, CGPreflightListenEventAccess() {
+                self.inputMonitoringProblem = false
+            }
             if self.role == .controller {
                 self.eventTap.start()
             }
             self.updateAppearance()
-            self.stopAccessibilityTimer()
+            if !self.accessibilityProblem && !self.inputMonitoringProblem {
+                self.stopAccessibilityTimer()
+            }
         }
     }
 
@@ -181,6 +195,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func grantAccessibility() {
         _ = requestAccessibilityIfNeeded(prompt: true)
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+        NSWorkspace.shared.open(url)
+    }
+
+    @objc private func grantInputMonitoring() {
+        _ = requestInputMonitoringIfNeeded(prompt: true)
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
         NSWorkspace.shared.open(url)
     }
 
@@ -196,6 +216,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let label: String
         if accessibilityProblem {
             label = "Needs Accessibility Permission"
+        } else if inputMonitoringProblem {
+            label = "Needs Input Monitoring Permission"
         } else {
             switch state {
             case .off:
@@ -212,6 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         powerItem.state = isOn ? .on : .off
         chooseRoleItem.title = isOn ? "Change Role..." : "Choose Role..."
         accessibilityItem?.isHidden = !accessibilityProblem
+        inputMonitoringItem?.isHidden = !inputMonitoringProblem
 
     }
 
@@ -219,6 +242,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func requestAccessibilityIfNeeded(prompt: Bool) -> Bool {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: prompt] as CFDictionary
         return AXIsProcessTrustedWithOptions(options)
+    }
+
+    @discardableResult
+    private func requestInputMonitoringIfNeeded(prompt: Bool) -> Bool {
+        if CGPreflightListenEventAccess() {
+            return true
+        }
+        if prompt {
+            return CGRequestListenEventAccess()
+        }
+        return false
     }
 
 }

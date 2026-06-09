@@ -63,6 +63,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <true/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>NoBarrierMouse connects to your other Mac on the local network to share keyboard and mouse input.</string>
+  <key>NSInputMonitoringUsageDescription</key>
+  <string>NoBarrierMouse needs Input Monitoring on the controller Mac to capture keyboard input while controlling another Mac.</string>
   <key>NSBonjourServices</key>
   <array>
     <string>_nobarriermouse._tcp</string>

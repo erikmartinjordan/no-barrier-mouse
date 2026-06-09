@@ -19,6 +19,7 @@ A tiny macOS menu-bar app for sharing one mouse and keyboard between two Macs on
 - macOS 10.15 or newer
 - Xcode Command Line Tools
 - Accessibility permission on both Macs
+- Input Monitoring permission on the controller Mac
 - Local Network permission if macOS asks for it
 
 ## Build
@@ -48,10 +49,13 @@ The app bundles are created in:
 2. Choose `Controller` on the Mac with the physical mouse and keyboard.
 3. Choose `Receiver` on the Mac you want to control.
 4. Grant Accessibility permission on both Macs.
-5. Move through the controller's right screen edge to enter the receiver.
-6. Move through the receiver's left screen edge, or press `Esc`, to return.
+5. Grant Input Monitoring permission on the controller Mac.
+6. Move through the controller's right screen edge to enter the receiver.
+7. Move through the receiver's left screen edge, or press `Esc`, to return.
 
 If the cursor moves but clicks or scrolling do not work, remove the old No Barrier Mouse entry from Privacy & Security, add the current app again, then reopen it.
+
+If mouse and clicks work but the keyboard does not, grant Input Monitoring permission on the controller Mac, then quit and reopen No Barrier Mouse.
 
 ## Release Strategy
 
