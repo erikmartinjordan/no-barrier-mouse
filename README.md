@@ -1,7 +1,7 @@
 # No Barrier Mouse
 
 <p align="center">
-  <img src="assets/icon.png" alt="No Barrier Mouse icon" width="512" height="512" />
+  <img src="assets/icon.png" alt="No Barrier Mouse icon" width="128" height="128" />
 </p>
 
 <p align="center">
