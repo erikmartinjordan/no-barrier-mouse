@@ -14,7 +14,6 @@ final class PeerNetwork {
 
     private let serviceType = "_nobarriermouse._tcp"
     private let queue = DispatchQueue(label: "NoBarrierMouse.Network", qos: .userInteractive)
-    private let inputQueue = DispatchQueue(label: "NoBarrierMouse.Input", qos: .userInteractive)
     private let codec = WireCodec()
     private let id = PeerIdentity.load()
 
@@ -178,22 +177,14 @@ final class PeerNetwork {
         }
     }
 
-    // Route event messages to a dedicated high-priority input queue to avoid main thread contention.
-    // Control messages stay on main queue for safety (AppKit interactions).
+    // All messages dispatched to main queue. CGEventSource / CGWarpMouseCursorPosition / CGEvent.post
+    // can have thread-safety issues on some macOS versions when called from non-main queues.
+    // TODO: evaluate dedicated high-priority input queue on macOS 15+ once confirmed safe.
     private func dispatchMessage(_ message: WireMessage, receivedAt: UInt64) {
-        switch message {
-        case .release, .returnControl, .activate, .enter:
-            let recvAt = receivedAt
-            DispatchQueue.main.async {
-                self.recordLatency(from: recvAt, message: message)
-                self.onMessage?(message)
-            }
-        default:
-            let recvAt = receivedAt
-            inputQueue.async {
-                self.recordLatency(from: recvAt, message: message)
-                self.onMessage?(message)
-            }
+        let recvAt = receivedAt
+        DispatchQueue.main.async {
+            self.recordLatency(from: recvAt, message: message)
+            self.onMessage?(message)
         }
     }
 

@@ -7,17 +7,12 @@ final class RemoteInput {
     var onReleaseRequested: (() -> Void)?
     var onInputPostingBlocked: (() -> Void)?
 
-    private let eventSource: CGEventSource
+    private lazy var eventSource = CGEventSource(stateID: .hidSystemState)!
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
     private var didRequestRelease = false
-    private var cursorPoint: CGPoint
-
-    init() {
-        eventSource = CGEventSource(stateID: .hidSystemState)!
-        cursorPoint = .zero
-    }
+    private lazy var cursorPoint: CGPoint = currentMousePoint()
     private var mainScreen: CGRect {
         CGDisplayBounds(CGMainDisplayID())
     }
