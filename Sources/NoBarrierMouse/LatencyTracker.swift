@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let latencyLog = OSLog(subsystem: "com.nobarriermouse", category: "latency")
 
 private let latencyTimebase: mach_timebase_info_data_t = {
     var info = mach_timebase_info_data_t()
@@ -62,6 +65,32 @@ final class LatencyTracker {
         queue.async { self.networkOneWay.add(microseconds) }
     }
 
+    struct MetricSnapshot {
+        let p50: Double
+        let p90: Double
+        let p99: Double
+        let max: Double
+        let count: Int
+        let buckets: [(range: String, count: Int)]
+    }
+
+    struct FullSnapshot {
+        let captureToSend: MetricSnapshot?
+        let receiveToApply: MetricSnapshot?
+        let networkOneWay: MetricSnapshot?
+    }
+
+    func snapshot(completion: @escaping (FullSnapshot) -> Void) {
+        queue.async {
+            let snap = FullSnapshot(
+                captureToSend: self.captureToSend.snapshot(),
+                receiveToApply: self.receiveToApply.snapshot(),
+                networkOneWay: self.networkOneWay.snapshot()
+            )
+            DispatchQueue.main.async { completion(snap) }
+        }
+    }
+
     private func logStats() {
         let c2s = captureToSend.report()
         let r2a = receiveToApply.report()
@@ -83,11 +112,21 @@ final class LatencyTracker {
             networkOneWay.reset()
         }
 
-        print(lines.joined(separator: " | "))
+        os_log("%{public}@", log: latencyLog, type: .info, lines.joined(separator: " | "))
     }
 }
 
-private func fmt(_ us: Double) -> String {
+let histogramBucketBounds: [Double] = [0, 100, 250, 500, 1000, 2000, 5000, 10_000, 20_000, 50_000, Double.infinity]
+
+func histogramBucketRange(_ index: Int) -> String {
+    let lo = histogramBucketBounds[index]
+    let hi = histogramBucketBounds[index + 1]
+    let loStr = lo == 0 ? "0" : lo >= 1000 ? "\(Int(lo / 1000))ms" : "\(Int(lo))µs"
+    let hiStr = hi == Double.infinity ? "+" : hi >= 1000 ? "\(Int(hi / 1000))ms" : "\(Int(hi))µs"
+    return "\(loStr)-\(hiStr)"
+}
+
+func fmt(_ us: Double) -> String {
     if us < 1000 {
         return String(format: "%.0fµs", us)
     }
@@ -96,17 +135,25 @@ private func fmt(_ us: Double) -> String {
 
 private struct RollingLatency {
     private var samples: [Double]
+    private var histogram: [Int]
     private let capacity: Int
 
     init(capacity: Int) {
         self.capacity = capacity
         self.samples = []
         self.samples.reserveCapacity(capacity)
+        self.histogram = [Int](repeating: 0, count: histogramBucketBounds.count - 1)
     }
 
     mutating func add(_ value: Double) {
         if samples.count < capacity {
             samples.append(value)
+        }
+        for i in 0..<(histogramBucketBounds.count - 1) {
+            if value >= histogramBucketBounds[i] && value < histogramBucketBounds[i + 1] {
+                histogram[i] += 1
+                return
+            }
         }
     }
 
@@ -123,7 +170,26 @@ private struct RollingLatency {
         )
     }
 
+    func snapshot() -> LatencyTracker.MetricSnapshot? {
+        guard !samples.isEmpty else { return nil }
+        let sorted = samples.sorted()
+        let n = sorted.count
+        var buckets: [(range: String, count: Int)] = []
+        for i in 0..<histogram.count {
+            buckets.append((histogramBucketRange(i), histogram[i]))
+        }
+        return LatencyTracker.MetricSnapshot(
+            p50: sorted[n / 2],
+            p90: sorted[Int((Double(n) * 0.9).rounded(.up)) - 1],
+            p99: sorted[Int((Double(n) * 0.99).rounded(.up)) - 1],
+            max: sorted.last!,
+            count: n,
+            buckets: buckets
+        )
+    }
+
     mutating func reset() {
         samples.removeAll(keepingCapacity: true)
+        histogram = [Int](repeating: 0, count: histogramBucketBounds.count - 1)
     }
 }

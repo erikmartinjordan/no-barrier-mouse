@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let eventTap = EventTap()
     private let remoteInput = RemoteInput()
     private let roleSelectionController = RoleSelectionController()
+    private lazy var statsController = StatsWindowController()
 
     private var isOn = false
     private var role: AppRole?
@@ -74,6 +75,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(inputItem)
         inputMonitoringItem = inputItem
         menu.addItem(NSMenuItem.separator())
+        let statsItem = NSMenuItem(title: "Statistics...", action: #selector(showStats), keyEquivalent: "")
+        statsItem.target = self
+        menu.addItem(statsItem)
+        menu.addItem(NSMenuItem.separator())
         menu.addItem(quitItem)
         statusItem.menu = menu
     }
@@ -126,6 +131,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             chooseRole()
         }
+    }
+
+    @objc private func showStats() {
+        statsController.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     private func handleNetworkMessage(_ message: WireMessage) {
