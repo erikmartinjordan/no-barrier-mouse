@@ -78,7 +78,7 @@ final class PeerNetwork {
     }
 
     private func sendUDP(_ message: WireMessage) {
-        guard let udpConnection else {
+        guard let udpConnection, udpConnection.state == .ready else {
             sendTCP(message)
             return
         }
@@ -216,11 +216,11 @@ final class PeerNetwork {
             let udp = NWConnection(host: host, port: port, using: .udp)
             udp.stateUpdateHandler = { [weak self] state in
                 if state == .ready {
+                    self?.udpConnection = udp
                     self?.startReceivingUDP()
                 }
             }
             udp.start(queue: queue)
-            udpConnection = udp
         } else {
             let port = NWEndpoint.Port(integerLiteral: Self.udpPort)
             do {
