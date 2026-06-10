@@ -274,10 +274,11 @@ enum MouseIcon {
         image.lockFocus()
 
         strokeColor.setStroke()
-        NSColor.clear.setFill()
+        strokeColor.withAlphaComponent(0.22).setFill()
 
         let body = NSBezierPath(roundedRect: NSRect(x: 6, y: 3, width: 10, height: 15), xRadius: 5, yRadius: 5)
         body.lineWidth = 1.6
+        body.fill()
         body.stroke()
 
         let line = NSBezierPath()
@@ -290,6 +291,8 @@ enum MouseIcon {
         let rightLens = NSBezierPath(ovalIn: NSRect(x: 11, y: 8, width: 7, height: 5))
         leftLens.lineWidth = 1.3
         rightLens.lineWidth = 1.3
+        leftLens.fill()
+        rightLens.fill()
         leftLens.stroke()
         rightLens.stroke()
 
