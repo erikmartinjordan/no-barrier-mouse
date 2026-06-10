@@ -7,7 +7,7 @@ final class RemoteInput {
     var onReleaseRequested: (() -> Void)?
     var onInputPostingBlocked: (() -> Void)?
 
-    private lazy var eventSource = CGEventSource(stateID: .hidSystemState)!
+    private lazy var eventSource = CGEventSource(stateID: .hidSystemState)
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
