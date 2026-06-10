@@ -167,8 +167,14 @@ final class EventTap {
     }
 
     private func pinLocalCursor(at y: Double) {
+        pinnedY = y
         let screen = NSScreenFrame.main
         CGWarpMouseCursorPosition(CGPoint(x: screen.maxX - 8, y: y))
+    }
+
+    private func pinLocalCursor() {
+        let screen = NSScreenFrame.main
+        CGWarpMouseCursorPosition(CGPoint(x: screen.maxX - 8, y: pinnedY))
     }
 
     private func flushDelta() {
@@ -214,6 +220,7 @@ final class EventTap {
     private var lastDeltaSend = CFAbsoluteTime(0)
     private var scheduledDeltaFlush: DispatchWorkItem?
     private let deltaThrottle: TimeInterval = 1.0 / 500.0
+    private var pinnedY: Double = 0
 
     private func forward(type: CGEventType, event: CGEvent) {
         switch type {
@@ -228,6 +235,7 @@ final class EventTap {
                 scheduledDeltaFlush?.cancel()
                 scheduledDeltaFlush = nil
                 sendPendingDelta()
+                pinLocalCursor()
             } else {
                 scheduleDeltaFlush(after: deltaThrottle - elapsed)
             }
