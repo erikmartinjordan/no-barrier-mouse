@@ -29,6 +29,10 @@ final class PeerNetwork {
         }
     }
 
+    private static let udpPort: UInt16 = 51234
+    private var udpListener: NWListener?
+    private var udpConnection: NWConnection?
+
     func start(role: AppRole) {
         guard state == .off else { return }
         self.role = role == .controller ? .controller : .receiver
@@ -42,14 +46,27 @@ final class PeerNetwork {
         browser?.cancel()
         listener?.cancel()
         connection?.cancel()
+        udpConnection?.cancel()
+        udpListener?.cancel()
         browser = nil
         listener = nil
         connection = nil
+        udpConnection = nil
+        udpListener = nil
         receiveBuffer.removeAll()
         state = .off
     }
 
     func send(_ message: WireMessage) {
+        switch message {
+        case .mouseDelta, .scroll:
+            sendUDP(message)
+        default:
+            sendTCP(message)
+        }
+    }
+
+    private func sendTCP(_ message: WireMessage) {
         guard let connection else { return }
         let body = codec.encode(message)
         let length = UInt16(body.count)
@@ -58,6 +75,15 @@ final class PeerNetwork {
         packet.append(UInt8((length >> 8) & 0xFF))
         packet.append(body)
         connection.send(content: packet, completion: .contentProcessed { _ in })
+    }
+
+    private func sendUDP(_ message: WireMessage) {
+        guard let udpConnection else {
+            sendTCP(message)
+            return
+        }
+        let data = codec.encode(message)
+        udpConnection.send(content: data, completion: .contentProcessed { _ in })
     }
 
     private func startListener() {
@@ -154,6 +180,7 @@ final class PeerNetwork {
                     if case .hello = message {
                         if state == .connecting {
                             state = .connected
+                            setupUDPChannel()
                         }
                     } else {
                         DispatchQueue.main.async { self.onMessage?(message) }
@@ -178,6 +205,63 @@ final class PeerNetwork {
         guard receiveBuffer.count >= 2 + length else { return nil }
         defer { receiveBuffer.removeSubrange(0..<(2 + length)) }
         return codec.decode(from: Data(receiveBuffer[2..<(2 + length)]))
+    }
+
+    private func setupUDPChannel() {
+        guard let tcpConnection = connection else { return }
+
+        if role == .controller {
+            guard let host = peerHost(from: tcpConnection) else { return }
+            let port = NWEndpoint.Port(integerLiteral: Self.udpPort)
+            let udp = NWConnection(host: host, port: port, using: .udp)
+            udp.stateUpdateHandler = { [weak self] state in
+                if state == .ready {
+                    self?.startReceivingUDP()
+                }
+            }
+            udp.start(queue: queue)
+            udpConnection = udp
+        } else {
+            let port = NWEndpoint.Port(integerLiteral: Self.udpPort)
+            do {
+                let params = NWParameters.udp
+                let listener = try NWListener(using: params, on: port)
+                listener.newConnectionHandler = { [weak self] incoming in
+                    self?.udpConnection = incoming
+                    self?.startReceivingUDP()
+                }
+                listener.start(queue: queue)
+                udpListener = listener
+            } catch {
+                // UDP unavailable: fall back to TCP-only
+            }
+        }
+    }
+
+    private func startReceivingUDP() {
+        udpConnection?.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, _, error in
+            guard let self else { return }
+            defer {
+                if error == nil {
+                    self.startReceivingUDP()
+                }
+            }
+            guard let data, !data.isEmpty else { return }
+            if let message = self.codec.decode(from: data) {
+                DispatchQueue.main.async { self.onMessage?(message) }
+            }
+        }
+    }
+
+    private func peerHost(from connection: NWConnection) -> NWEndpoint.Host? {
+        if let remote = connection.currentPath?.remoteEndpoint,
+           case .hostPort(let host, _) = remote {
+            return host
+        }
+        if case .hostPort(let host, _) = connection.endpoint {
+            return host
+        }
+        return nil
     }
 
     private func makeParameters() -> NWParameters {
