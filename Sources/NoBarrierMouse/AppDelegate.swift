@@ -82,7 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         network.onState = { [weak self] state in
             self?.state = state
             self?.eventTap.isConnected = state == .connected
-            if state != .connected {
+            if state != .connected, state != .connecting {
                 self?.eventTap.releaseLocalControl()
             }
         }
@@ -228,6 +228,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .waiting:
                 let r = role.map { " (\($0))" } ?? ""
                 label = "Waiting for another device\(r)"
+            case .connecting:
+                let r = role.map { " (\($0))" } ?? ""
+                label = "Handshaking\(r)"
             case .connected:
                 let r = role.map { " (\($0))" } ?? ""
                 label = "Connected\(r)"

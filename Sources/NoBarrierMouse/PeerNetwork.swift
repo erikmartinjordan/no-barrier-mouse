@@ -4,6 +4,7 @@ import Network
 enum ConnectionState: Equatable {
     case off
     case waiting
+    case connecting
     case connected
 }
 
@@ -103,7 +104,7 @@ final class PeerNetwork {
             guard let self else { return }
             switch state {
             case .ready:
-                self.state = .connected
+                self.state = .connecting
                 self.send(.hello(id: self.id, role: self.role))
                 self.receive()
             case .failed, .cancelled:
@@ -126,7 +127,13 @@ final class PeerNetwork {
             if let data, !data.isEmpty {
                 receiveBuffer.append(data)
                 while let message = tryReadMessage() {
-                    DispatchQueue.main.async { self.onMessage?(message) }
+                    if case .hello = message {
+                        if state == .connecting {
+                            state = .connected
+                        }
+                    } else {
+                        DispatchQueue.main.async { self.onMessage?(message) }
+                    }
                 }
             }
 
