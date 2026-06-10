@@ -7,19 +7,24 @@ final class RemoteInput {
     var onReleaseRequested: (() -> Void)?
     var onInputPostingBlocked: (() -> Void)?
 
-    private lazy var eventSource = CGEventSource(stateID: .hidSystemState)
+    private let eventSource: CGEventSource
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
     private var didRequestRelease = false
-    private lazy var cursorPoint: CGPoint = currentMousePoint()
+    private var cursorPoint: CGPoint
+
+    init() {
+        eventSource = CGEventSource(stateID: .hidSystemState)!
+        cursorPoint = .zero
+    }
     private var mainScreen: CGRect {
         CGDisplayBounds(CGMainDisplayID())
     }
 
     func apply(_ message: WireMessage) {
         switch message {
-        case .mouseDelta(let dx, let dy, _):
+        case .mouseDelta(let dx, let dy, _, _):
             moveMouse(dx: dx, dy: dy)
         case .mouseDown(let button):
             guard canPostInputEvents() else { return }
@@ -27,20 +32,20 @@ final class RemoteInput {
         case .mouseUp(let button):
             guard canPostInputEvents() else { return }
             postMouse(button: button, down: false)
-        case .scroll(let dx, let dy):
+        case .scroll(let dx, let dy, _):
             guard canPostInputEvents() else { return }
             let event = CGEvent(scrollWheelEvent2Source: eventSource, units: .line, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
-            event?.post(tap: .cghidEventTap)
-        case .key(let code, let down, let flags):
+            event?.post(tap: CGEventTapLocation.cghidEventTap)
+        case .key(let code, let down, let flags, _):
             guard canPostInputEvents() else { return }
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: down)
             event?.flags = CGEventFlags(wireValue: flags)
-            event?.post(tap: .cghidEventTap)
-        case .flags(let code, let flags):
+            event?.post(tap: CGEventTapLocation.cghidEventTap)
+        case .flags(let code, let flags, _):
             guard canPostInputEvents() else { return }
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: true)
             event?.flags = CGEventFlags(wireValue: flags)
-            event?.post(tap: .cghidEventTap)
+            event?.post(tap: CGEventTapLocation.cghidEventTap)
         case .activate:
             enterFromLeftEdge(at: mainScreen.midY)
         case .enter(let y):
@@ -106,7 +111,7 @@ final class RemoteInput {
             button = .left
         }
 
-        CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: point, mouseButton: button)?.post(tap: .cghidEventTap)
+        CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: point, mouseButton: button)?.post(tap: CGEventTapLocation.cghidEventTap)
     }
 
     private func enterFromLeftEdge(at y: Double) {
@@ -150,7 +155,7 @@ final class RemoteInput {
                 event.setIntegerValueField(.mouseEventClickState, value: Int64(lastClickCount))
             }
 
-            event.post(tap: .cghidEventTap)
+            event.post(tap: CGEventTapLocation.cghidEventTap)
         }
     }
 }

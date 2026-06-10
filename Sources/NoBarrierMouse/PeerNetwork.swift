@@ -14,6 +14,7 @@ final class PeerNetwork {
 
     private let serviceType = "_nobarriermouse._tcp"
     private let queue = DispatchQueue(label: "NoBarrierMouse.Network", qos: .userInteractive)
+    private let inputQueue = DispatchQueue(label: "NoBarrierMouse.Input", qos: .userInteractive)
     private let codec = WireCodec()
     private let id = PeerIdentity.load()
 
@@ -47,6 +48,7 @@ final class PeerNetwork {
         connection = nil
         receiveBuffer.removeAll()
         state = .off
+        LatencyTracker.shared.stop()
     }
 
     func send(_ message: WireMessage) {
@@ -148,15 +150,18 @@ final class PeerNetwork {
         connection?.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
             guard let self else { return }
 
+            let receivedAt = mach_absolute_time()
+
             if let data, !data.isEmpty {
                 receiveBuffer.append(data)
                 while let message = tryReadMessage() {
                     if case .hello = message {
                         if state == .connecting {
                             state = .connected
+                            LatencyTracker.shared.start()
                         }
                     } else {
-                        DispatchQueue.main.async { self.onMessage?(message) }
+                        dispatchMessage(message, receivedAt: receivedAt)
                     }
                 }
             }
@@ -165,10 +170,41 @@ final class PeerNetwork {
                 self.connection?.cancel()
                 self.connection = nil
                 self.state = self.listener == nil ? .off : .waiting
+                LatencyTracker.shared.stop()
                 return
             }
 
             self.receive()
+        }
+    }
+
+    // Route event messages to a dedicated high-priority input queue to avoid main thread contention.
+    // Control messages stay on main queue for safety (AppKit interactions).
+    private func dispatchMessage(_ message: WireMessage, receivedAt: UInt64) {
+        switch message {
+        case .release, .returnControl, .activate, .enter:
+            let recvAt = receivedAt
+            DispatchQueue.main.async {
+                self.recordLatency(from: recvAt, message: message)
+                self.onMessage?(message)
+            }
+        default:
+            let recvAt = receivedAt
+            inputQueue.async {
+                self.recordLatency(from: recvAt, message: message)
+                self.onMessage?(message)
+            }
+        }
+    }
+
+    private func recordLatency(from receivedAt: UInt64, message: WireMessage) {
+        let now = mach_absolute_time()
+        let receiveToApply = absoluteTimeDiff(now - receivedAt)
+        LatencyTracker.shared.recordReceiveToApply(receiveToApply)
+
+        if let sentAt = message.sentAt {
+            let rawDiff = absoluteTimeDiff(now - sentAt)
+            LatencyTracker.shared.recordNetworkOneWay(rawDiff)
         }
     }
 
@@ -188,6 +224,18 @@ final class PeerNetwork {
         params.includePeerToPeer = true
         params.serviceClass = .interactiveVideo
         return params
+    }
+}
+
+extension WireMessage {
+    var sentAt: UInt64? {
+        switch self {
+        case .mouseDelta(_, _, _, let s): return s
+        case .scroll(_, _, let s): return s
+        case .key(_, _, _, let s): return s
+        case .flags(_, _, let s): return s
+        default: return nil
+        }
     }
 }
 

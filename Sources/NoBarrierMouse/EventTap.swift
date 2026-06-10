@@ -3,6 +3,13 @@ import AppKit
 import CoreGraphics
 import Foundation
 
+enum ThrottleRate: Double, CaseIterable {
+    case immediate = 0
+    case hz1000 = 0.001
+    case hz500 = 0.002
+    case hz250 = 0.004
+}
+
 final class EventTap {
     var isForwarding = false
     var isConnected = false
@@ -10,6 +17,7 @@ final class EventTap {
     var onForwardingChanged: ((Bool) -> Void)?
     var onEmergencyOff: (() -> Void)?
     var onCaptureFailed: (() -> Void)?
+    var throttleRate: ThrottleRate = .hz500
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -94,6 +102,7 @@ final class EventTap {
     }
 
     fileprivate func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        lastCapturedAt = mach_absolute_time()
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
@@ -184,11 +193,15 @@ final class EventTap {
     }
 
     private func sendPendingDelta() {
-        if pendingDelta.x != 0 || pendingDelta.y != 0 {
-            send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
-            pendingDelta = .zero
-            lastDeltaSend = CFAbsoluteTimeGetCurrent()
+        guard pendingDelta.x != 0 || pendingDelta.y != 0 else { return }
+        let now = mach_absolute_time()
+        if lastCapturedAt != 0 {
+            let elapsed = absoluteTimeDiff(now - lastCapturedAt)
+            LatencyTracker.shared.recordCaptureToSend(elapsed)
         }
+        send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil, sentAt: now))
+        pendingDelta = .zero
+        lastDeltaSend = CFAbsoluteTimeGetCurrent()
     }
 
     private func scheduleDeltaFlush(after delay: TimeInterval) {
@@ -219,8 +232,9 @@ final class EventTap {
     private var pendingDelta = CGPoint.zero
     private var lastDeltaSend = CFAbsoluteTime(0)
     private var scheduledDeltaFlush: DispatchWorkItem?
-    private let deltaThrottle: TimeInterval = 1.0 / 500.0
+    private var deltaThrottle: TimeInterval { throttleRate.rawValue }
     private var pinnedY: Double = 0
+    private var lastCapturedAt: UInt64 = 0
 
     private func forward(type: CGEventType, event: CGEvent) {
         switch type {
@@ -260,16 +274,16 @@ final class EventTap {
         case .scrollWheel:
             let dy = event.getDoubleValueField(.scrollWheelEventDeltaAxis1)
             let dx = event.getDoubleValueField(.scrollWheelEventDeltaAxis2)
-            send?(.scroll(dx: dx, dy: dy))
+            send?(.scroll(dx: dx, dy: dy, sentAt: mach_absolute_time()))
         case .keyDown:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.key(code: code, down: true, flags: event.flags.wireValue))
+            send?(.key(code: code, down: true, flags: event.flags.wireValue, sentAt: mach_absolute_time()))
         case .keyUp:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.key(code: code, down: false, flags: event.flags.wireValue))
+            send?(.key(code: code, down: false, flags: event.flags.wireValue, sentAt: mach_absolute_time()))
         case .flagsChanged:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.flags(code: code, flags: event.flags.wireValue))
+            send?(.flags(code: code, flags: event.flags.wireValue, sentAt: mach_absolute_time()))
         default:
             break
         }
