@@ -13,7 +13,7 @@ final class PeerNetwork {
 
     private let serviceType = "_nobarriermouse._tcp"
     private let queue = DispatchQueue(label: "NoBarrierMouse.Network", qos: .userInteractive)
-    private let codec = LineCodec()
+    private let codec = WireCodec()
     private let id = PeerIdentity.load()
 
     private var listener: NWListener?
@@ -48,8 +48,14 @@ final class PeerNetwork {
     }
 
     func send(_ message: WireMessage) {
-        guard let data = codec.encode(message), let connection else { return }
-        connection.send(content: data, completion: .contentProcessed { _ in })
+        guard let connection else { return }
+        let body = codec.encode(message)
+        let length = UInt16(body.count)
+        var packet = Data(capacity: 2 + body.count)
+        packet.append(UInt8(length & 0xFF))
+        packet.append(UInt8((length >> 8) & 0xFF))
+        packet.append(body)
+        connection.send(content: packet, completion: .contentProcessed { _ in })
     }
 
     private func startListener() {
@@ -118,7 +124,8 @@ final class PeerNetwork {
             guard let self else { return }
 
             if let data, !data.isEmpty {
-                for message in self.codec.decodeLines(from: data, buffer: &self.receiveBuffer) {
+                receiveBuffer.append(data)
+                while let message = tryReadMessage() {
                     DispatchQueue.main.async { self.onMessage?(message) }
                 }
             }
@@ -132,6 +139,14 @@ final class PeerNetwork {
 
             self.receive()
         }
+    }
+
+    private func tryReadMessage() -> WireMessage? {
+        guard receiveBuffer.count >= 2 else { return nil }
+        let length = Int(receiveBuffer[0]) | Int(receiveBuffer[1]) << 8
+        guard receiveBuffer.count >= 2 + length else { return nil }
+        defer { receiveBuffer.removeSubrange(0..<(2 + length)) }
+        return codec.decode(from: Data(receiveBuffer[2..<(2 + length)]))
     }
 
     private func makeParameters() -> NWParameters {

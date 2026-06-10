@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-enum WireMessage: Codable, Equatable {
+enum WireMessage: Equatable {
     case hello(id: String, role: PeerRole)
     case mouseDelta(dx: Double, dy: Double, button: Int?)
     case mouseDown(button: Int)
@@ -10,135 +10,204 @@ enum WireMessage: Codable, Equatable {
     case key(code: UInt16, down: Bool, flags: UInt64)
     case flags(code: UInt16, flags: UInt64)
     case activate
-    case enter
+    case enter(y: Double)
     case release
     case returnControl
 
-    enum PeerRole: String, Codable {
+    enum PeerRole: String {
         case controller
         case receiver
     }
+}
 
-    private enum CodingKeys: String, CodingKey {
-        case type, id, role, dx, dy, button, code, down, flags
+final class WireCodec {
+    func encode(_ message: WireMessage) -> Data {
+        var data = Data()
+        switch message {
+        case .hello(let id, let role):
+            data.appendByte(0)
+            data.appendString(id)
+            data.appendString(role.rawValue)
+        case .mouseDelta(let dx, let dy, let button):
+            data.appendByte(1)
+            data.appendFloat32LE(Float32(dx))
+            data.appendFloat32LE(Float32(dy))
+            data.appendOptionalByte(button.map(UInt8.init))
+        case .mouseDown(let button):
+            data.appendByte(2)
+            data.appendByte(UInt8(button))
+        case .mouseUp(let button):
+            data.appendByte(3)
+            data.appendByte(UInt8(button))
+        case .scroll(let dx, let dy):
+            data.appendByte(4)
+            data.appendFloat32LE(Float32(dx))
+            data.appendFloat32LE(Float32(dy))
+        case .key(let code, let down, let flags):
+            data.appendByte(5)
+            data.appendUInt16LE(code)
+            data.appendByte(down ? 1 : 0)
+            data.appendUInt64LE(flags)
+        case .flags(let code, let flags):
+            data.appendByte(6)
+            data.appendUInt16LE(code)
+            data.appendUInt64LE(flags)
+        case .activate:
+            data.appendByte(7)
+        case .enter(let y):
+            data.appendByte(8)
+            data.appendFloat32LE(Float32(y))
+        case .release:
+            data.appendByte(9)
+        case .returnControl:
+            data.appendByte(10)
+        }
+        return data
     }
 
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        let type = try values.decode(String.self, forKey: .type)
+    func decode(from data: Data) -> WireMessage? {
+        var offset = 0
+        guard let type = data.readByte(at: &offset) else { return nil }
 
         switch type {
-        case "hello":
-            self = .hello(
-                id: try values.decode(String.self, forKey: .id),
-                role: try values.decodeIfPresent(PeerRole.self, forKey: .role) ?? .controller
-            )
-        case "mouseDelta":
-            self = .mouseDelta(
-                dx: try values.decode(Double.self, forKey: .dx),
-                dy: try values.decode(Double.self, forKey: .dy),
-                button: try values.decodeIfPresent(Int.self, forKey: .button)
-            )
-        case "mouseDown":
-            self = .mouseDown(button: try values.decode(Int.self, forKey: .button))
-        case "mouseUp":
-            self = .mouseUp(button: try values.decode(Int.self, forKey: .button))
-        case "scroll":
-            self = .scroll(
-                dx: try values.decode(Double.self, forKey: .dx),
-                dy: try values.decode(Double.self, forKey: .dy)
-            )
-        case "key":
-            self = .key(
-                code: try values.decode(UInt16.self, forKey: .code),
-                down: try values.decode(Bool.self, forKey: .down),
-                flags: try values.decode(UInt64.self, forKey: .flags)
-            )
-        case "flags":
-            self = .flags(
-                code: try values.decode(UInt16.self, forKey: .code),
-                flags: try values.decode(UInt64.self, forKey: .flags)
-            )
-        case "activate":
-            self = .activate
-        case "enter":
-            self = .enter
-        case "release":
-            self = .release
-        case "returnControl":
-            self = .returnControl
+        case 0:
+            guard let id = data.readString(at: &offset),
+                  let roleRaw = data.readString(at: &offset) else { return nil }
+            return .hello(id: id, role: WireMessage.PeerRole(rawValue: roleRaw) ?? .receiver)
+        case 1:
+            guard let dx = data.readFloat32LE(at: &offset),
+                  let dy = data.readFloat32LE(at: &offset) else { return nil }
+            let button = data.readOptionalByte(at: &offset).map { Int($0) }
+            return .mouseDelta(dx: Double(dx), dy: Double(dy), button: button)
+        case 2:
+            guard let button = data.readByte(at: &offset) else { return nil }
+            return .mouseDown(button: Int(button))
+        case 3:
+            guard let button = data.readByte(at: &offset) else { return nil }
+            return .mouseUp(button: Int(button))
+        case 4:
+            guard let dx = data.readFloat32LE(at: &offset),
+                  let dy = data.readFloat32LE(at: &offset) else { return nil }
+            return .scroll(dx: Double(dx), dy: Double(dy))
+        case 5:
+            guard let code = data.readUInt16LE(at: &offset),
+                  let downRaw = data.readByte(at: &offset),
+                  let flags = data.readUInt64LE(at: &offset) else { return nil }
+            return .key(code: code, down: downRaw != 0, flags: flags)
+        case 6:
+            guard let code = data.readUInt16LE(at: &offset),
+                  let flags = data.readUInt64LE(at: &offset) else { return nil }
+            return .flags(code: code, flags: flags)
+        case 7:
+            return .activate
+        case 8:
+            guard let y = data.readFloat32LE(at: &offset) else { return nil }
+            return .enter(y: Double(y))
+        case 9:
+            return .release
+        case 10:
+            return .returnControl
         default:
-            throw DecodingError.dataCorruptedError(forKey: .type, in: values, debugDescription: "Unknown message type")
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var values = encoder.container(keyedBy: CodingKeys.self)
-
-        switch self {
-        case .hello(let id, let role):
-            try values.encode("hello", forKey: .type)
-            try values.encode(id, forKey: .id)
-            try values.encode(role, forKey: .role)
-        case .mouseDelta(let dx, let dy, let button):
-            try values.encode("mouseDelta", forKey: .type)
-            try values.encode(dx, forKey: .dx)
-            try values.encode(dy, forKey: .dy)
-            try values.encodeIfPresent(button, forKey: .button)
-        case .mouseDown(let button):
-            try values.encode("mouseDown", forKey: .type)
-            try values.encode(button, forKey: .button)
-        case .mouseUp(let button):
-            try values.encode("mouseUp", forKey: .type)
-            try values.encode(button, forKey: .button)
-        case .scroll(let dx, let dy):
-            try values.encode("scroll", forKey: .type)
-            try values.encode(dx, forKey: .dx)
-            try values.encode(dy, forKey: .dy)
-        case .key(let code, let down, let flags):
-            try values.encode("key", forKey: .type)
-            try values.encode(code, forKey: .code)
-            try values.encode(down, forKey: .down)
-            try values.encode(flags, forKey: .flags)
-        case .flags(let code, let flags):
-            try values.encode("flags", forKey: .type)
-            try values.encode(code, forKey: .code)
-            try values.encode(flags, forKey: .flags)
-        case .activate:
-            try values.encode("activate", forKey: .type)
-        case .enter:
-            try values.encode("enter", forKey: .type)
-        case .release:
-            try values.encode("release", forKey: .type)
-        case .returnControl:
-            try values.encode("returnControl", forKey: .type)
+            return nil
         }
     }
 }
 
-final class LineCodec {
-    private let encoder = JSONEncoder()
-    private let decoder = JSONDecoder()
-
-    func encode(_ message: WireMessage) -> Data? {
-        guard var data = try? encoder.encode(message) else { return nil }
-        data.append(0x0A)
-        return data
+extension Data {
+    mutating func appendByte(_ value: UInt8) {
+        append(value)
     }
 
-    func decodeLines(from data: Data, buffer: inout Data) -> [WireMessage] {
-        buffer.append(data)
-        var messages: [WireMessage] = []
+    mutating func appendUInt16LE(_ value: UInt16) {
+        append(UInt8(value & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
+    }
 
-        while let newline = buffer.firstIndex(of: 0x0A) {
-            let line = buffer[..<newline]
-            buffer.removeSubrange(...newline)
-            if let message = try? decoder.decode(WireMessage.self, from: Data(line)) {
-                messages.append(message)
-            }
+    mutating func appendUInt64LE(_ value: UInt64) {
+        append(UInt8(value & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
+        append(UInt8((value >> 16) & 0xFF))
+        append(UInt8((value >> 24) & 0xFF))
+        append(UInt8((value >> 32) & 0xFF))
+        append(UInt8((value >> 40) & 0xFF))
+        append(UInt8((value >> 48) & 0xFF))
+        append(UInt8((value >> 56) & 0xFF))
+    }
+
+    mutating func appendFloat32LE(_ value: Float32) {
+        appendUInt32LE(value.bitPattern)
+    }
+
+    mutating func appendUInt32LE(_ value: UInt32) {
+        append(UInt8(value & 0xFF))
+        append(UInt8((value >> 8) & 0xFF))
+        append(UInt8((value >> 16) & 0xFF))
+        append(UInt8((value >> 24) & 0xFF))
+    }
+
+    mutating func appendString(_ string: String) {
+        let bytes = Data(string.utf8)
+        appendUInt16LE(UInt16(bytes.count))
+        append(bytes)
+    }
+
+    mutating func appendOptionalByte(_ value: UInt8?) {
+        if let value {
+            appendByte(1)
+            appendByte(value)
+        } else {
+            appendByte(0)
         }
+    }
 
-        return messages
+    func readByte(at offset: inout Int) -> UInt8? {
+        guard offset + 1 <= count else { return nil }
+        defer { offset += 1 }
+        return self[offset]
+    }
+
+    func readUInt16LE(at offset: inout Int) -> UInt16? {
+        guard offset + 2 <= count else { return nil }
+        let v = UInt16(self[offset]) | UInt16(self[offset + 1]) << 8
+        offset += 2
+        return v
+    }
+
+    func readUInt64LE(at offset: inout Int) -> UInt64? {
+        guard offset + 8 <= count else { return nil }
+        let v = UInt64(self[offset]) |
+               UInt64(self[offset + 1]) << 8 |
+               UInt64(self[offset + 2]) << 16 |
+               UInt64(self[offset + 3]) << 24 |
+               UInt64(self[offset + 4]) << 32 |
+               UInt64(self[offset + 5]) << 40 |
+               UInt64(self[offset + 6]) << 48 |
+               UInt64(self[offset + 7]) << 56
+        offset += 8
+        return v
+    }
+
+    func readFloat32LE(at offset: inout Int) -> Float32? {
+        guard offset + 4 <= count else { return nil }
+        let bits = UInt32(self[offset]) |
+                   UInt32(self[offset + 1]) << 8 |
+                   UInt32(self[offset + 2]) << 16 |
+                   UInt32(self[offset + 3]) << 24
+        offset += 4
+        return Float32(bitPattern: bits)
+    }
+
+    func readOptionalByte(at offset: inout Int) -> UInt8? {
+        guard let present = readByte(at: &offset), present != 0 else { return nil }
+        return readByte(at: &offset)
+    }
+
+    func readString(at offset: inout Int) -> String? {
+        guard let length = readUInt16LE(at: &offset) else { return nil }
+        let lengthInt = Int(length)
+        guard offset + lengthInt <= count else { return nil }
+        defer { offset += lengthInt }
+        return String(data: self[offset..<offset + lengthInt], encoding: .utf8)
     }
 }
 
