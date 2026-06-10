@@ -113,7 +113,7 @@ final class EventTap {
         }
 
         if !isForwarding, shouldEnterRemote(type: type, event: event) {
-            enterRemoteControl()
+            enterRemoteControl(at: event.location.y)
             return nil
         }
 
@@ -144,12 +144,12 @@ final class EventTap {
         return crossesRightEdge(event: event, type: type) || isKeyboardEnterRemote(type: type, event: event)
     }
 
-    private func enterRemoteControl() {
+    private func enterRemoteControl(at y: Double) {
         isForwarding = true
         suppressLocalCursor()
-        send?(.enter)
+        send?(.enter(y: y))
         onForwardingChanged?(true)
-        pinLocalCursor()
+        pinLocalCursor(at: y)
     }
 
     private func suppressLocalCursor() {
@@ -166,9 +166,9 @@ final class EventTap {
         localCursorSuppressed = false
     }
 
-    private func pinLocalCursor() {
+    private func pinLocalCursor(at y: Double) {
         let screen = NSScreenFrame.main
-        CGWarpMouseCursorPosition(CGPoint(x: screen.maxX - 8, y: screen.midY))
+        CGWarpMouseCursorPosition(CGPoint(x: screen.maxX - 8, y: y))
     }
 
     private func flushDelta() {
@@ -181,7 +181,7 @@ final class EventTap {
         if pendingDelta.x != 0 || pendingDelta.y != 0 {
             send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
             pendingDelta = .zero
-            lastDeltaSend = Date()
+            lastDeltaSend = CFAbsoluteTimeGetCurrent()
         }
     }
 
@@ -211,7 +211,7 @@ final class EventTap {
     }
 
     private var pendingDelta = CGPoint.zero
-    private var lastDeltaSend = Date.distantPast
+    private var lastDeltaSend = CFAbsoluteTime(0)
     private var scheduledDeltaFlush: DispatchWorkItem?
     private let deltaThrottle: TimeInterval = 1.0 / 500.0
 
@@ -222,8 +222,8 @@ final class EventTap {
             let dy = event.getDoubleValueField(.mouseEventDeltaY)
             pendingDelta.x += dx
             pendingDelta.y += dy
-            let now = Date()
-            let elapsed = now.timeIntervalSince(lastDeltaSend)
+            let now = CFAbsoluteTimeGetCurrent()
+            let elapsed = now - lastDeltaSend
             if elapsed >= deltaThrottle {
                 scheduledDeltaFlush?.cancel()
                 scheduledDeltaFlush = nil
@@ -231,7 +231,6 @@ final class EventTap {
             } else {
                 scheduleDeltaFlush(after: deltaThrottle - elapsed)
             }
-            pinLocalCursor()
         case .leftMouseDown:
             flushDelta()
             send?(.mouseDown(button: 0))
@@ -273,4 +272,10 @@ private func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: 
     guard let userInfo else { return Unmanaged.passRetained(event) }
     let tap = Unmanaged<EventTap>.fromOpaque(userInfo).takeUnretainedValue()
     return tap.handle(proxy: proxy, type: type, event: event)
+}
+
+enum NSScreenFrame {
+    static var main: CGRect {
+        NSScreen.main?.frame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+    }
 }
