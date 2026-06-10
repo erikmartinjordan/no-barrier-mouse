@@ -35,6 +35,7 @@ final class PeerNetwork {
         state = .waiting
         startListener()
         startBrowser()
+        scheduleBrowserRetry()
     }
 
     func stop() {
@@ -86,14 +87,37 @@ final class PeerNetwork {
                 return true
             }) else { return }
 
+            if case .service(let name, _, _, _) = result.endpoint {
+                guard self.id.localizedStandardCompare(name) == .orderedAscending else { return }
+            }
+
             self.adopt(NWConnection(to: result.endpoint, using: params))
         }
         browser.start(queue: queue)
         self.browser = browser
     }
 
+    private func scheduleBrowserRetry() {
+        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self, self.state == .waiting, self.connection == nil else { return }
+            self.browser?.cancel()
+            self.browser = nil
+            self.startBrowser()
+            self.scheduleBrowserRetry()
+        }
+    }
+
     private func adopt(_ candidate: NWConnection) {
         if let connection {
+            switch connection.state {
+            case .setup, .preparing, .ready, .waiting:
+                candidate.cancel()
+                return
+            case .failed, .cancelled:
+                break
+            @unknown default:
+                break
+            }
             connection.cancel()
         }
 
