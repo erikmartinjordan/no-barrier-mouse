@@ -143,7 +143,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         isOn = true
         accessibilityProblem = !requestAccessibilityIfNeeded(prompt: true)
         if role == .controller {
-            inputMonitoringProblem = !requestInputMonitoringIfNeeded(prompt: true)
+            if #available(macOS 11, *) {
+                inputMonitoringProblem = !requestInputMonitoringIfNeeded(prompt: true)
+            }
             if !eventTap.start() {
                 accessibilityProblem = true
                 startAccessibilityTimer()
@@ -174,7 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if self.accessibilityProblem, AXIsProcessTrusted() {
                 self.accessibilityProblem = false
             }
-            if self.inputMonitoringProblem, CGPreflightListenEventAccess() {
+            if self.inputMonitoringProblem, #available(macOS 11, *), CGPreflightListenEventAccess() {
                 self.inputMonitoringProblem = false
             }
             if self.role == .controller {
@@ -199,6 +201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func grantInputMonitoring() {
+        guard #available(macOS 11, *) else { return }
         _ = requestInputMonitoringIfNeeded(prompt: true)
         let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")!
         NSWorkspace.shared.open(url)
