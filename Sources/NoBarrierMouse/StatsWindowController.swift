@@ -61,7 +61,6 @@ private final class StatsView: NSView {
 
         y = drawSection(label: "Capture → Send (C→S)", metric: snapshot.captureToSend, y: y)
         y = drawSection(label: "Receive → Apply (R→A)", metric: snapshot.receiveToApply, y: y)
-        y = drawSection(label: "Network One-Way (Net)", metric: snapshot.networkOneWay, y: y)
     }
 
     private func drawSection(label: String, metric: LatencyTracker.MetricSnapshot?, y: CGFloat) -> CGFloat {

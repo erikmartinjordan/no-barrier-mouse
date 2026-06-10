@@ -3,12 +3,12 @@ import Foundation
 
 enum WireMessage: Equatable {
     case hello(id: String, role: PeerRole)
-    case mouseDelta(dx: Double, dy: Double, button: Int?, sentAt: UInt64)
+    case mouseDelta(dx: Double, dy: Double, button: Int?)
     case mouseDown(button: Int)
     case mouseUp(button: Int)
-    case scroll(dx: Double, dy: Double, sentAt: UInt64)
-    case key(code: UInt16, down: Bool, flags: UInt64, sentAt: UInt64)
-    case flags(code: UInt16, flags: UInt64, sentAt: UInt64)
+    case scroll(dx: Double, dy: Double)
+    case key(code: UInt16, down: Bool, flags: UInt64)
+    case flags(code: UInt16, flags: UInt64)
     case activate
     case enter(y: Double)
     case release
@@ -28,9 +28,8 @@ final class WireCodec {
             data.appendByte(0)
             data.appendString(id)
             data.appendString(role.rawValue)
-        case .mouseDelta(let dx, let dy, let button, let sentAt):
+        case .mouseDelta(let dx, let dy, let button):
             data.appendByte(1)
-            data.appendUInt64LE(sentAt)
             data.appendFloat32LE(Float32(dx))
             data.appendFloat32LE(Float32(dy))
             data.appendOptionalByte(button.map(UInt8.init))
@@ -40,20 +39,17 @@ final class WireCodec {
         case .mouseUp(let button):
             data.appendByte(3)
             data.appendByte(UInt8(button))
-        case .scroll(let dx, let dy, let sentAt):
+        case .scroll(let dx, let dy):
             data.appendByte(4)
-            data.appendUInt64LE(sentAt)
             data.appendFloat32LE(Float32(dx))
             data.appendFloat32LE(Float32(dy))
-        case .key(let code, let down, let flags, let sentAt):
+        case .key(let code, let down, let flags):
             data.appendByte(5)
-            data.appendUInt64LE(sentAt)
             data.appendUInt16LE(code)
             data.appendByte(down ? 1 : 0)
             data.appendUInt64LE(flags)
-        case .flags(let code, let flags, let sentAt):
+        case .flags(let code, let flags):
             data.appendByte(6)
-            data.appendUInt64LE(sentAt)
             data.appendUInt16LE(code)
             data.appendUInt64LE(flags)
         case .activate:
@@ -79,11 +75,10 @@ final class WireCodec {
                   let roleRaw = data.readString(at: &offset) else { return nil }
             return .hello(id: id, role: WireMessage.PeerRole(rawValue: roleRaw) ?? .receiver)
         case 1:
-            guard let sentAt = data.readUInt64LE(at: &offset),
-                  let dx = data.readFloat32LE(at: &offset),
+            guard let dx = data.readFloat32LE(at: &offset),
                   let dy = data.readFloat32LE(at: &offset) else { return nil }
             let button = data.readOptionalByte(at: &offset).map { Int($0) }
-            return .mouseDelta(dx: Double(dx), dy: Double(dy), button: button, sentAt: sentAt)
+            return .mouseDelta(dx: Double(dx), dy: Double(dy), button: button)
         case 2:
             guard let button = data.readByte(at: &offset) else { return nil }
             return .mouseDown(button: Int(button))
@@ -91,21 +86,18 @@ final class WireCodec {
             guard let button = data.readByte(at: &offset) else { return nil }
             return .mouseUp(button: Int(button))
         case 4:
-            guard let sentAt = data.readUInt64LE(at: &offset),
-                  let dx = data.readFloat32LE(at: &offset),
+            guard let dx = data.readFloat32LE(at: &offset),
                   let dy = data.readFloat32LE(at: &offset) else { return nil }
-            return .scroll(dx: Double(dx), dy: Double(dy), sentAt: sentAt)
+            return .scroll(dx: Double(dx), dy: Double(dy))
         case 5:
-            guard let sentAt = data.readUInt64LE(at: &offset),
-                  let code = data.readUInt16LE(at: &offset),
+            guard let code = data.readUInt16LE(at: &offset),
                   let downRaw = data.readByte(at: &offset),
                   let flags = data.readUInt64LE(at: &offset) else { return nil }
-            return .key(code: code, down: downRaw != 0, flags: flags, sentAt: sentAt)
+            return .key(code: code, down: downRaw != 0, flags: flags)
         case 6:
-            guard let sentAt = data.readUInt64LE(at: &offset),
-                  let code = data.readUInt16LE(at: &offset),
+            guard let code = data.readUInt16LE(at: &offset),
                   let flags = data.readUInt64LE(at: &offset) else { return nil }
-            return .flags(code: code, flags: flags, sentAt: sentAt)
+            return .flags(code: code, flags: flags)
         case 7:
             return .activate
         case 8:

@@ -19,7 +19,7 @@ final class RemoteInput {
 
     func apply(_ message: WireMessage) {
         switch message {
-        case .mouseDelta(let dx, let dy, _, _):
+        case .mouseDelta(let dx, let dy, _):
             moveMouse(dx: dx, dy: dy)
         case .mouseDown(let button):
             guard canPostInputEvents() else { return }
@@ -27,16 +27,16 @@ final class RemoteInput {
         case .mouseUp(let button):
             guard canPostInputEvents() else { return }
             postMouse(button: button, down: false)
-        case .scroll(let dx, let dy, _):
+        case .scroll(let dx, let dy):
             guard canPostInputEvents() else { return }
             let event = CGEvent(scrollWheelEvent2Source: eventSource, units: .line, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
             event?.post(tap: CGEventTapLocation.cghidEventTap)
-        case .key(let code, let down, let flags, _):
+        case .key(let code, let down, let flags):
             guard canPostInputEvents() else { return }
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: down)
             event?.flags = CGEventFlags(wireValue: flags)
             event?.post(tap: CGEventTapLocation.cghidEventTap)
-        case .flags(let code, let flags, _):
+        case .flags(let code, let flags):
             guard canPostInputEvents() else { return }
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: true)
             event?.flags = CGEventFlags(wireValue: flags)

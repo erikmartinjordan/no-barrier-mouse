@@ -183,20 +183,15 @@ final class PeerNetwork {
     private func dispatchMessage(_ message: WireMessage, receivedAt: UInt64) {
         let recvAt = receivedAt
         DispatchQueue.main.async {
-            self.recordLatency(from: recvAt, message: message)
+            self.recordLatency(from: recvAt)
             self.onMessage?(message)
         }
     }
 
-    private func recordLatency(from receivedAt: UInt64, message: WireMessage) {
+    private func recordLatency(from receivedAt: UInt64) {
         let now = mach_absolute_time()
         let receiveToApply = absoluteTimeDiff(now - receivedAt)
         LatencyTracker.shared.recordReceiveToApply(receiveToApply)
-
-        if let sentAt = message.sentAt {
-            let rawDiff = absoluteTimeDiff(now - sentAt)
-            LatencyTracker.shared.recordNetworkOneWay(rawDiff)
-        }
     }
 
     private func tryReadMessage() -> WireMessage? {
@@ -215,18 +210,6 @@ final class PeerNetwork {
         params.includePeerToPeer = true
         params.serviceClass = .interactiveVideo
         return params
-    }
-}
-
-extension WireMessage {
-    var sentAt: UInt64? {
-        switch self {
-        case .mouseDelta(_, _, _, let s): return s
-        case .scroll(_, _, let s): return s
-        case .key(_, _, _, let s): return s
-        case .flags(_, _, let s): return s
-        default: return nil
-        }
     }
 }
 

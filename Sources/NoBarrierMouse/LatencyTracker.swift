@@ -19,7 +19,6 @@ final class LatencyTracker {
     private let queue = DispatchQueue(label: "NoBarrierMouse.Latency", qos: .utility)
     private var captureToSend = RollingLatency(capacity: 2000)
     private var receiveToApply = RollingLatency(capacity: 2000)
-    private var networkOneWay = RollingLatency(capacity: 2000)
     private var logTimer: DispatchSourceTimer?
     private var started = false
 
@@ -49,7 +48,6 @@ final class LatencyTracker {
             self.started = false
             self.captureToSend.reset()
             self.receiveToApply.reset()
-            self.networkOneWay.reset()
         }
     }
 
@@ -59,10 +57,6 @@ final class LatencyTracker {
 
     func recordReceiveToApply(_ microseconds: Double) {
         queue.async { self.receiveToApply.add(microseconds) }
-    }
-
-    func recordNetworkOneWay(_ microseconds: Double) {
-        queue.async { self.networkOneWay.add(microseconds) }
     }
 
     struct MetricSnapshot {
@@ -77,15 +71,13 @@ final class LatencyTracker {
     struct FullSnapshot {
         let captureToSend: MetricSnapshot?
         let receiveToApply: MetricSnapshot?
-        let networkOneWay: MetricSnapshot?
     }
 
     func snapshot(completion: @escaping (FullSnapshot) -> Void) {
         queue.async {
             let snap = FullSnapshot(
                 captureToSend: self.captureToSend.snapshot(),
-                receiveToApply: self.receiveToApply.snapshot(),
-                networkOneWay: self.networkOneWay.snapshot()
+                receiveToApply: self.receiveToApply.snapshot()
             )
             DispatchQueue.main.async { completion(snap) }
         }
@@ -94,9 +86,8 @@ final class LatencyTracker {
     private func logStats() {
         let c2s = captureToSend.report()
         let r2a = receiveToApply.report()
-        let net = networkOneWay.report()
 
-        guard c2s != nil || r2a != nil || net != nil else { return }
+        guard c2s != nil || r2a != nil else { return }
 
         var lines: [String] = ["[Latency]"]
         if let c = c2s {
@@ -106,10 +97,6 @@ final class LatencyTracker {
         if let c = r2a {
             lines.append("R→A: p50=\(fmt(c.p50)) p90=\(fmt(c.p90)) p99=\(fmt(c.p99)) max=\(fmt(c.max)) n=\(c.count)")
             receiveToApply.reset()
-        }
-        if let c = net {
-            lines.append("Net: p50=\(fmt(c.p50)) p90=\(fmt(c.p90)) p99=\(fmt(c.p99)) max=\(fmt(c.max)) n=\(c.count)")
-            networkOneWay.reset()
         }
 
         os_log("%{public}@", log: latencyLog, type: .info, lines.joined(separator: " | "))

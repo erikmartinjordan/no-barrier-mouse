@@ -199,7 +199,7 @@ final class EventTap {
             let elapsed = absoluteTimeDiff(now - lastCapturedAt)
             LatencyTracker.shared.recordCaptureToSend(elapsed)
         }
-        send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil, sentAt: now))
+        send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
         pendingDelta = .zero
         lastDeltaSend = CFAbsoluteTimeGetCurrent()
     }
@@ -274,16 +274,16 @@ final class EventTap {
         case .scrollWheel:
             let dy = event.getDoubleValueField(.scrollWheelEventDeltaAxis1)
             let dx = event.getDoubleValueField(.scrollWheelEventDeltaAxis2)
-            send?(.scroll(dx: dx, dy: dy, sentAt: mach_absolute_time()))
+            send?(.scroll(dx: dx, dy: dy))
         case .keyDown:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.key(code: code, down: true, flags: event.flags.wireValue, sentAt: mach_absolute_time()))
+            send?(.key(code: code, down: true, flags: event.flags.wireValue))
         case .keyUp:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.key(code: code, down: false, flags: event.flags.wireValue, sentAt: mach_absolute_time()))
+            send?(.key(code: code, down: false, flags: event.flags.wireValue))
         case .flagsChanged:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.flags(code: code, flags: event.flags.wireValue, sentAt: mach_absolute_time()))
+            send?(.flags(code: code, flags: event.flags.wireValue))
         default:
             break
         }
