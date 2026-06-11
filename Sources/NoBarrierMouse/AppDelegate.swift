@@ -91,23 +91,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.eventTap.releaseLocalControl()
             }
         }
-        network.onMessage = { [weak self] message in
-            self?.handleNetworkMessage(message)
+        network.onMessage = { [weak self] message, receivedAt in
+            self?.handleNetworkMessage(message, receivedAt: receivedAt)
         }
         remoteInput.onInputPostingBlocked = { [weak self] in
-            self?.accessibilityProblem = true
-            self?.startAccessibilityTimer()
-            self?.updateAppearance()
+            DispatchQueue.main.async {
+                self?.accessibilityProblem = true
+                self?.startAccessibilityTimer()
+                self?.updateAppearance()
+            }
         }
         eventTap.send = { [weak self] message in
             self?.network.send(message)
         }
         remoteInput.onReleaseRequested = { [weak self] in
             guard let self else { return }
-            if self.role == .controller {
-                self.eventTap.reclaimLocalControlFromRemote()
-            } else {
-                self.network.send(.returnControl)
+            DispatchQueue.main.async {
+                if self.role == .controller {
+                    self.eventTap.reclaimLocalControlFromRemote()
+                } else {
+                    self.network.send(.returnControl)
+                }
             }
         }
         eventTap.onEmergencyOff = { [weak self] in
@@ -138,13 +142,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    private func handleNetworkMessage(_ message: WireMessage) {
+    private func handleNetworkMessage(_ message: WireMessage, receivedAt: UInt64) {
         if (message == .release || message == .returnControl), role == .controller {
-            eventTap.reclaimLocalControlFromRemote()
+            DispatchQueue.main.async { [eventTap] in
+                eventTap.reclaimLocalControlFromRemote()
+                LatencyTracker.shared.recordReceiveToApply(absoluteTimeDiff(mach_absolute_time() - receivedAt))
+            }
             return
         }
 
         remoteInput.apply(message)
+        LatencyTracker.shared.recordReceiveToApply(absoluteTimeDiff(mach_absolute_time() - receivedAt))
     }
 
     private func turnOn(role: AppRole) {

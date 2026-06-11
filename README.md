@@ -39,8 +39,8 @@ Build the Intel app from an Apple Silicon Mac:
 The app bundles are created in:
 
 ```text
-.build/release/NoBarrierMouse.app
-.build/release/NoBarrierMouse-Intel.app
+.build/release/native/NoBarrierMouse.app
+.build/release/intel/NoBarrierMouse.app
 ```
 
 ## Use

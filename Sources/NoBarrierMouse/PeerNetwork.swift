@@ -10,7 +10,7 @@ enum ConnectionState: Equatable {
 
 final class PeerNetwork {
     var onState: ((ConnectionState) -> Void)?
-    var onMessage: ((WireMessage) -> Void)?
+    var onMessage: ((WireMessage, UInt64) -> Void)?
 
     private let serviceType = "_nobarriermouse._tcp"
     private let queue = DispatchQueue(label: "NoBarrierMouse.Network", qos: .userInteractive)
@@ -153,16 +153,32 @@ final class PeerNetwork {
 
             if let data, !data.isEmpty {
                 receiveBuffer.append(data)
+                var pendingMouseDelta: (dx: Double, dy: Double, receivedAt: UInt64)?
+
+                func flushPendingMouseDelta() {
+                    guard let delta = pendingMouseDelta else { return }
+                    pendingMouseDelta = nil
+                    dispatchMessage(.mouseDelta(dx: delta.dx, dy: delta.dy, button: nil), receivedAt: delta.receivedAt)
+                }
+
                 while let message = tryReadMessage() {
                     if case .hello = message {
                         if state == .connecting {
                             state = .connected
                             LatencyTracker.shared.start()
                         }
+                    } else if case .mouseDelta(let dx, let dy, nil) = message {
+                        if let existing = pendingMouseDelta {
+                            pendingMouseDelta = (existing.dx + dx, existing.dy + dy, receivedAt)
+                        } else {
+                            pendingMouseDelta = (dx, dy, receivedAt)
+                        }
                     } else {
+                        flushPendingMouseDelta()
                         dispatchMessage(message, receivedAt: receivedAt)
                     }
                 }
+                flushPendingMouseDelta()
             }
 
             if complete || error != nil {
@@ -177,21 +193,8 @@ final class PeerNetwork {
         }
     }
 
-    // All messages dispatched to main queue. CGEventSource / CGWarpMouseCursorPosition / CGEvent.post
-    // can have thread-safety issues on some macOS versions when called from non-main queues.
-    // TODO: evaluate dedicated high-priority input queue on macOS 15+ once confirmed safe.
     private func dispatchMessage(_ message: WireMessage, receivedAt: UInt64) {
-        let recvAt = receivedAt
-        DispatchQueue.main.async {
-            self.recordLatency(from: recvAt)
-            self.onMessage?(message)
-        }
-    }
-
-    private func recordLatency(from receivedAt: UInt64) {
-        let now = mach_absolute_time()
-        let receiveToApply = absoluteTimeDiff(now - receivedAt)
-        LatencyTracker.shared.recordReceiveToApply(receiveToApply)
+        onMessage?(message, receivedAt)
     }
 
     private func tryReadMessage() -> WireMessage? {
@@ -208,7 +211,7 @@ final class PeerNetwork {
 
         let params = NWParameters(tls: nil, tcp: tcpOptions)
         params.includePeerToPeer = true
-        params.serviceClass = .interactiveVideo
+        params.serviceClass = .interactiveVoice
         return params
     }
 }

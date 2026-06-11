@@ -15,12 +15,12 @@ if [ "$ARCH" = "intel" ]; then
   SCRATCH=".build-intel"
   SWIFT_BUILD_ARGS="-c release --arch x86_64 --disable-sandbox --scratch-path $SCRATCH"
   BUILD_DIR="$SCRATCH/x86_64-apple-macosx/release"
-  APP=".build/release/NoBarrierMouse-Intel.app"
+  APP=".build/release/intel/NoBarrierMouse.app"
 else
   SCRATCH=".build-native"
   SWIFT_BUILD_ARGS="-c release --disable-sandbox --scratch-path $SCRATCH"
   BUILD_DIR="$SCRATCH/release"
-  APP=".build/release/NoBarrierMouse.app"
+  APP=".build/release/native/NoBarrierMouse.app"
 fi
 
 mkdir -p .build/module-cache
@@ -46,7 +46,7 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleExecutable</key>
   <string>NoBarrierMouse</string>
   <key>CFBundleIdentifier</key>
-  <string>local.nobarriermouse.app</string>
+  <string>com.erikmartinjordan.NoBarrierMouse</string>
   <key>CFBundleName</key>
   <string>NoBarrierMouse</string>
   <key>CFBundleDisplayName</key>
@@ -58,6 +58,8 @@ cat > "$CONTENTS/Info.plist" <<PLIST
   <key>CFBundleVersion</key>
   <string>$BUILD_NUMBER</string>
   <key>CFBundleIconFile</key>
+  <string>NoBarrierMouse</string>
+  <key>CFBundleIconName</key>
   <string>NoBarrierMouse</string>
   <key>LSUIElement</key>
   <true/>

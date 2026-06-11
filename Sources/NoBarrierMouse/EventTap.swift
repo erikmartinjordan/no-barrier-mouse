@@ -17,7 +17,7 @@ final class EventTap {
     var onForwardingChanged: ((Bool) -> Void)?
     var onEmergencyOff: (() -> Void)?
     var onCaptureFailed: (() -> Void)?
-    var throttleRate: ThrottleRate = .hz500
+    var throttleRate: ThrottleRate = .hz1000
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -111,7 +111,7 @@ final class EventTap {
         }
 
         if isEmergencyRelease(type: type, event: event) {
-            send?(.release)
+            sendCaptured(.release)
             releaseLocalControl()
             onEmergencyOff?()
             return nil
@@ -131,7 +131,7 @@ final class EventTap {
         }
 
         if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 {
-            send?(.release)
+            sendCaptured(.release)
             releaseLocalControl()
             let screen = NSScreenFrame.main
             CGWarpMouseCursorPosition(CGPoint(x: screen.midX, y: screen.midY))
@@ -156,7 +156,7 @@ final class EventTap {
     private func enterRemoteControl(at y: Double) {
         isForwarding = true
         suppressLocalCursor()
-        send?(.enter(y: y))
+        sendCaptured(.enter(y: y))
         onForwardingChanged?(true)
         pinLocalCursor(at: y)
     }
@@ -186,6 +186,14 @@ final class EventTap {
         CGWarpMouseCursorPosition(CGPoint(x: screen.maxX - 8, y: pinnedY))
     }
 
+    private func pinLocalCursorIfNeeded() {
+        guard localCursorSuppressed else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastCursorPinAt >= cursorPinInterval else { return }
+        lastCursorPinAt = now
+        pinLocalCursor()
+    }
+
     private func flushDelta() {
         scheduledDeltaFlush?.cancel()
         scheduledDeltaFlush = nil
@@ -194,12 +202,7 @@ final class EventTap {
 
     private func sendPendingDelta() {
         guard pendingDelta.x != 0 || pendingDelta.y != 0 else { return }
-        let now = mach_absolute_time()
-        if lastCapturedAt != 0 {
-            let elapsed = absoluteTimeDiff(now - lastCapturedAt)
-            LatencyTracker.shared.recordCaptureToSend(elapsed)
-        }
-        send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
+        sendCaptured(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
         pendingDelta = .zero
         lastDeltaSend = CFAbsoluteTimeGetCurrent()
     }
@@ -235,6 +238,15 @@ final class EventTap {
     private var deltaThrottle: TimeInterval { throttleRate.rawValue }
     private var pinnedY: Double = 0
     private var lastCapturedAt: UInt64 = 0
+    private var lastCursorPinAt = CFAbsoluteTime(0)
+    private let cursorPinInterval = 1.0 / 120.0
+
+    private func sendCaptured(_ message: WireMessage) {
+        if lastCapturedAt != 0 {
+            LatencyTracker.shared.recordCaptureToSend(absoluteTimeDiff(mach_absolute_time() - lastCapturedAt))
+        }
+        send?(message)
+    }
 
     private func forward(type: CGEventType, event: CGEvent) {
         switch type {
@@ -249,41 +261,41 @@ final class EventTap {
                 scheduledDeltaFlush?.cancel()
                 scheduledDeltaFlush = nil
                 sendPendingDelta()
-                pinLocalCursor()
             } else {
                 scheduleDeltaFlush(after: deltaThrottle - elapsed)
             }
+            pinLocalCursorIfNeeded()
         case .leftMouseDown:
             flushDelta()
-            send?(.mouseDown(button: 0))
+            sendCaptured(.mouseDown(button: 0))
         case .leftMouseUp:
             flushDelta()
-            send?(.mouseUp(button: 0))
+            sendCaptured(.mouseUp(button: 0))
         case .rightMouseDown:
             flushDelta()
-            send?(.mouseDown(button: 1))
+            sendCaptured(.mouseDown(button: 1))
         case .rightMouseUp:
             flushDelta()
-            send?(.mouseUp(button: 1))
+            sendCaptured(.mouseUp(button: 1))
         case .otherMouseDown:
             flushDelta()
-            send?(.mouseDown(button: 2))
+            sendCaptured(.mouseDown(button: 2))
         case .otherMouseUp:
             flushDelta()
-            send?(.mouseUp(button: 2))
+            sendCaptured(.mouseUp(button: 2))
         case .scrollWheel:
             let dy = event.getDoubleValueField(.scrollWheelEventDeltaAxis1)
             let dx = event.getDoubleValueField(.scrollWheelEventDeltaAxis2)
-            send?(.scroll(dx: dx, dy: dy))
+            sendCaptured(.scroll(dx: dx, dy: dy))
         case .keyDown:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.key(code: code, down: true, flags: event.flags.wireValue))
+            sendCaptured(.key(code: code, down: true, flags: event.flags.wireValue))
         case .keyUp:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.key(code: code, down: false, flags: event.flags.wireValue))
+            sendCaptured(.key(code: code, down: false, flags: event.flags.wireValue))
         case .flagsChanged:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-            send?(.flags(code: code, flags: event.flags.wireValue))
+            sendCaptured(.flags(code: code, flags: event.flags.wireValue))
         default:
             break
         }

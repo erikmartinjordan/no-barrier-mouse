@@ -107,11 +107,11 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
-            .build/release/NoBarrierMouse.app \
+            .build/release/native/NoBarrierMouse.app \
             "NoBarrierMouse-${VERSION}-macOS.zip"
 
           ditto -c -k --sequesterRsrc --keepParent \
-            .build/release/NoBarrierMouse-Intel.app \
+            .build/release/intel/NoBarrierMouse.app \
             "NoBarrierMouse-${VERSION}-macOS-Intel.zip"
 
       - name: Upload artifacts

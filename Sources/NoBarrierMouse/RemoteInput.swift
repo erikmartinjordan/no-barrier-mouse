@@ -8,11 +8,14 @@ final class RemoteInput {
     var onInputPostingBlocked: (() -> Void)?
 
     private lazy var eventSource = CGEventSource(stateID: .hidSystemState)
+    private let doubleClickInterval = NSEvent.doubleClickInterval
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
     private var didRequestRelease = false
     private lazy var cursorPoint: CGPoint = currentMousePoint()
+    private var cachedTrust = AXIsProcessTrusted()
+    private var nextTrustCheck = CFAbsoluteTime(0)
     private var mainScreen: CGRect {
         CGDisplayBounds(CGMainDisplayID())
     }
@@ -55,7 +58,12 @@ final class RemoteInput {
     }
 
     private func canPostInputEvents() -> Bool {
-        if AXIsProcessTrusted() {
+        let now = CFAbsoluteTimeGetCurrent()
+        if now >= nextTrustCheck {
+            cachedTrust = AXIsProcessTrusted()
+            nextTrustCheck = now + 1.0
+        }
+        if cachedTrust {
             return true
         }
         onInputPostingBlocked?()
@@ -63,9 +71,7 @@ final class RemoteInput {
     }
 
     private func currentMousePoint() -> CGPoint {
-        let ns = NSEvent.mouseLocation
-        let frame = NSScreen.main?.frame ?? .zero
-        return CGPoint(x: ns.x, y: frame.height - ns.y)
+        CGEvent(source: nil)?.location ?? CGPoint(x: mainScreen.midX, y: mainScreen.midY)
     }
 
     private func moveMouse(dx: Double, dy: Double) {
@@ -140,7 +146,7 @@ final class RemoteInput {
             if button == 0 {
                 if down {
                     let now = CFAbsoluteTimeGetCurrent()
-                    if now - lastClickTime < NSEvent.doubleClickInterval {
+                    if now - lastClickTime < doubleClickInterval {
                         lastClickCount = min(lastClickCount + 1, 3)
                     } else {
                         lastClickCount = 1
