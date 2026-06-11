@@ -175,14 +175,15 @@ extension Data {
 
     func readUInt64LE(at offset: inout Int) -> UInt64? {
         guard offset + 8 <= count else { return nil }
-        let v = UInt64(self[offset]) |
-               UInt64(self[offset + 1]) << 8 |
-               UInt64(self[offset + 2]) << 16 |
-               UInt64(self[offset + 3]) << 24 |
-               UInt64(self[offset + 4]) << 32 |
-               UInt64(self[offset + 5]) << 40 |
-               UInt64(self[offset + 6]) << 48 |
-               UInt64(self[offset + 7]) << 56
+        let byte0 = UInt64(self[offset])
+        let byte1 = UInt64(self[offset + 1]) << 8
+        let byte2 = UInt64(self[offset + 2]) << 16
+        let byte3 = UInt64(self[offset + 3]) << 24
+        let byte4 = UInt64(self[offset + 4]) << 32
+        let byte5 = UInt64(self[offset + 5]) << 40
+        let byte6 = UInt64(self[offset + 6]) << 48
+        let byte7 = UInt64(self[offset + 7]) << 56
+        let v = byte0 | byte1 | byte2 | byte3 | byte4 | byte5 | byte6 | byte7
         offset += 8
         return v
     }
