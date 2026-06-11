@@ -6,7 +6,7 @@ final class StatsWindowController: NSWindowController {
 
     init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 700),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -60,9 +60,10 @@ private final class StatsView: NSView {
         guard let snapshot else { return }
 
         let content = bounds.insetBy(dx: padding, dy: padding)
-        let panelHeight = (content.height - panelGap) / 2
+        let panelHeight = (content.height - panelGap * 2) / 3
         let top = NSRect(x: content.minX, y: content.minY, width: content.width, height: panelHeight)
-        let bottom = NSRect(x: content.minX, y: top.maxY + panelGap, width: content.width, height: panelHeight)
+        let middle = NSRect(x: content.minX, y: top.maxY + panelGap, width: content.width, height: panelHeight)
+        let bottom = NSRect(x: content.minX, y: middle.maxY + panelGap, width: content.width, height: panelHeight)
 
         drawPanel(
             in: top,
@@ -70,6 +71,13 @@ private final class StatsView: NSView {
             subtitle: "Controller-side capture, batching, encoding and socket send",
             metric: snapshot.captureToSend,
             emptyText: "No controller samples yet on this Mac"
+        )
+        drawPanel(
+            in: middle,
+            title: "Input Queue",
+            subtitle: "Receiver-side delay from socket read to RemoteInput queue execution",
+            metric: snapshot.inputQueue,
+            emptyText: "No receiver queue samples yet on this Mac"
         )
         drawPanel(
             in: bottom,

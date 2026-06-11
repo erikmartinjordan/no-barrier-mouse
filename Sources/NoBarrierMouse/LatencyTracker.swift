@@ -35,8 +35,10 @@ final class LatencyTracker {
 
     private let queue = DispatchQueue(label: "NoBarrierMouse.Latency", qos: .utility)
     private var rollingC2S = RollingLatency(capacity: 2000)
+    private var rollingInputQueue = RollingLatency(capacity: 2000)
     private var rollingR2A = RollingLatency(capacity: 2000)
     private var cumulativeC2S = CumulativeHistogram()
+    private var cumulativeInputQueue = CumulativeHistogram()
     private var cumulativeR2A = CumulativeHistogram()
     private var logTimer: DispatchSourceTimer?
     private var started = false
@@ -66,6 +68,7 @@ final class LatencyTracker {
             self.logTimer = nil
             self.started = false
             self.rollingC2S.reset()
+            self.rollingInputQueue.reset()
             self.rollingR2A.reset()
         }
     }
@@ -74,6 +77,7 @@ final class LatencyTracker {
     func resetCumulative() {
         queue.async {
             self.cumulativeC2S.reset()
+            self.cumulativeInputQueue.reset()
             self.cumulativeR2A.reset()
         }
     }
@@ -82,6 +86,13 @@ final class LatencyTracker {
         queue.async {
             self.rollingC2S.add(microseconds)
             self.cumulativeC2S.add(microseconds)
+        }
+    }
+
+    func recordInputQueueDelay(_ microseconds: Double) {
+        queue.async {
+            self.rollingInputQueue.add(microseconds)
+            self.cumulativeInputQueue.add(microseconds)
         }
     }
 
@@ -103,6 +114,7 @@ final class LatencyTracker {
 
     struct FullSnapshot {
         let captureToSend: MetricSnapshot?
+        let inputQueue: MetricSnapshot?
         let receiveToApply: MetricSnapshot?
     }
 
@@ -110,6 +122,7 @@ final class LatencyTracker {
         queue.async {
             let snap = FullSnapshot(
                 captureToSend: self.cumulativeC2S.snapshot(),
+                inputQueue: self.cumulativeInputQueue.snapshot(),
                 receiveToApply: self.cumulativeR2A.snapshot()
             )
             DispatchQueue.main.async { completion(snap) }
@@ -118,14 +131,19 @@ final class LatencyTracker {
 
     private func logStats() {
         let c2s = rollingC2S.report()
+        let iq = rollingInputQueue.report()
         let r2a = rollingR2A.report()
 
-        guard c2s != nil || r2a != nil else { return }
+        guard c2s != nil || iq != nil || r2a != nil else { return }
 
         var lines: [String] = ["[Latency]"]
         if let c = c2s {
             lines.append("C→S: p50=\(fmt(c.p50)) p90=\(fmt(c.p90)) p99=\(fmt(c.p99)) max=\(fmt(c.max)) n=\(c.count)")
             rollingC2S.reset()
+        }
+        if let c = iq {
+            lines.append("IQ: p50=\(fmt(c.p50)) p90=\(fmt(c.p90)) p99=\(fmt(c.p99)) max=\(fmt(c.max)) n=\(c.count)")
+            rollingInputQueue.reset()
         }
         if let c = r2a {
             lines.append("R→A: p50=\(fmt(c.p50)) p90=\(fmt(c.p90)) p99=\(fmt(c.p99)) max=\(fmt(c.max)) n=\(c.count)")

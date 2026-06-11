@@ -151,8 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        remoteInput.apply(message)
-        LatencyTracker.shared.recordReceiveToApply(absoluteTimeDiff(mach_absolute_time() - receivedAt))
+        remoteInput.apply(message, receivedAt: receivedAt)
     }
 
     private func turnOn(role: AppRole) {
@@ -179,6 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func turnOff() {
         stopAccessibilityTimer()
         eventTap.stop()
+        remoteInput.reset()
         network.stop()
         role = nil
         isOn = false

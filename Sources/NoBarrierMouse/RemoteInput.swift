@@ -7,8 +7,10 @@ final class RemoteInput {
     var onReleaseRequested: (() -> Void)?
     var onInputPostingBlocked: (() -> Void)?
 
+    private let inputQueue = DispatchQueue(label: "NoBarrierMouse.RemoteInput", qos: .userInteractive)
     private lazy var eventSource = CGEventSource(stateID: .hidSystemState)
     private let doubleClickInterval = NSEvent.doubleClickInterval
+
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
@@ -16,45 +18,75 @@ final class RemoteInput {
     private lazy var cursorPoint: CGPoint = currentMousePoint()
     private var cachedTrust = AXIsProcessTrusted()
     private var nextTrustCheck = CFAbsoluteTime(0)
+
     private var mainScreen: CGRect {
         CGDisplayBounds(CGMainDisplayID())
     }
 
-    func apply(_ message: WireMessage) {
+    func apply(_ message: WireMessage, receivedAt: UInt64) {
+        if case .mouseDelta = message {
+            inputQueue.sync { self._apply(message, receivedAt: receivedAt) }
+            return
+        }
+        inputQueue.async { self._apply(message, receivedAt: receivedAt) }
+    }
+
+    func reset() {
+        inputQueue.sync {
+            self.pressedButton = nil
+            self.didRequestRelease = false
+        }
+    }
+
+    private func _apply(_ message: WireMessage, receivedAt: UInt64) {
         switch message {
         case .mouseDelta(let dx, let dy, _):
             moveMouse(dx: dx, dy: dy)
+            recordReceiveToApply(receivedAt)
         case .mouseDown(let button):
             guard canPostInputEvents() else { return }
             postMouse(button: button, down: true)
+            recordReceiveToApply(receivedAt)
         case .mouseUp(let button):
             guard canPostInputEvents() else { return }
             postMouse(button: button, down: false)
+            recordReceiveToApply(receivedAt)
         case .scroll(let dx, let dy):
             guard canPostInputEvents() else { return }
             let event = CGEvent(scrollWheelEvent2Source: eventSource, units: .line, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
-            event?.post(tap: CGEventTapLocation.cghidEventTap)
+            event?.post(tap: .cghidEventTap)
+            recordReceiveToApply(receivedAt)
         case .key(let code, let down, let flags):
             guard canPostInputEvents() else { return }
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: down)
             event?.flags = CGEventFlags(wireValue: flags)
-            event?.post(tap: CGEventTapLocation.cghidEventTap)
+            event?.post(tap: .cghidEventTap)
+            recordReceiveToApply(receivedAt)
         case .flags(let code, let flags):
             guard canPostInputEvents() else { return }
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: true)
             event?.flags = CGEventFlags(wireValue: flags)
-            event?.post(tap: CGEventTapLocation.cghidEventTap)
+            event?.post(tap: .cghidEventTap)
+            recordReceiveToApply(receivedAt)
         case .activate:
             enterFromLeftEdge(at: mainScreen.midY)
+            recordReceiveToApply(receivedAt)
         case .enter(let y):
             enterFromLeftEdge(at: y)
+            recordReceiveToApply(receivedAt)
         case .release:
             onReleaseRequested?()
+            recordReceiveToApply(receivedAt)
         case .returnControl:
             onReleaseRequested?()
+            recordReceiveToApply(receivedAt)
         case .hello:
             break
         }
+    }
+
+    private func recordReceiveToApply(_ receivedAt: UInt64) {
+        LatencyTracker.shared.recordReceiveToApply(absoluteTimeDiff(mach_absolute_time() - receivedAt))
     }
 
     private func canPostInputEvents() -> Bool {
@@ -86,7 +118,7 @@ final class RemoteInput {
 
         didRequestRelease = false
         CGWarpMouseCursorPosition(cursorPoint)
-        postMove(at: cursorPoint)
+        movedEvent(at: cursorPoint)
     }
 
     private func requestReleaseIfNeeded() {
@@ -96,23 +128,8 @@ final class RemoteInput {
         onReleaseRequested?()
     }
 
-    private func postMove(at point: CGPoint) {
-        let type: CGEventType
-        let button: CGMouseButton
-
-        switch pressedButton {
-        case 1:
-            type = .rightMouseDragged
-            button = .right
-        case 2:
-            type = .otherMouseDragged
-            button = .center
-        default:
-            type = pressedButton == nil ? .mouseMoved : .leftMouseDragged
-            button = .left
-        }
-
-        CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: point, mouseButton: button)?.post(tap: CGEventTapLocation.cghidEventTap)
+    private func movedEvent(at point: CGPoint) {
+        CGEvent(mouseEventSource: eventSource, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left)?.post(tap: .cghidEventTap)
     }
 
     private func enterFromLeftEdge(at y: Double) {
@@ -120,7 +137,7 @@ final class RemoteInput {
         cursorPoint = CGPoint(x: screen.minX + 5, y: min(max(y, screen.minY + 5), screen.maxY - 5))
         didRequestRelease = false
         CGWarpMouseCursorPosition(cursorPoint)
-        postMove(at: cursorPoint)
+        movedEvent(at: cursorPoint)
     }
 
     private func postMouse(button: Int, down: Bool) {
@@ -156,7 +173,7 @@ final class RemoteInput {
                 event.setIntegerValueField(.mouseEventClickState, value: Int64(lastClickCount))
             }
 
-            event.post(tap: CGEventTapLocation.cghidEventTap)
+            event.post(tap: .cghidEventTap)
         }
     }
 }

@@ -146,20 +146,13 @@ final class PeerNetwork {
     }
 
     private func receive() {
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
+        connection?.receive(minimumIncompleteLength: 3, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
             guard let self else { return }
 
             let receivedAt = mach_absolute_time()
 
             if let data, !data.isEmpty {
                 receiveBuffer.append(data)
-                var pendingMouseDelta: (dx: Double, dy: Double, receivedAt: UInt64)?
-
-                func flushPendingMouseDelta() {
-                    guard let delta = pendingMouseDelta else { return }
-                    pendingMouseDelta = nil
-                    dispatchMessage(.mouseDelta(dx: delta.dx, dy: delta.dy, button: nil), receivedAt: delta.receivedAt)
-                }
 
                 while let message = tryReadMessage() {
                     if case .hello = message {
@@ -167,18 +160,10 @@ final class PeerNetwork {
                             state = .connected
                             LatencyTracker.shared.start()
                         }
-                    } else if case .mouseDelta(let dx, let dy, nil) = message {
-                        if let existing = pendingMouseDelta {
-                            pendingMouseDelta = (existing.dx + dx, existing.dy + dy, receivedAt)
-                        } else {
-                            pendingMouseDelta = (dx, dy, receivedAt)
-                        }
                     } else {
-                        flushPendingMouseDelta()
                         dispatchMessage(message, receivedAt: receivedAt)
                     }
                 }
-                flushPendingMouseDelta()
             }
 
             if complete || error != nil {
