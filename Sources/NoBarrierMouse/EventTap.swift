@@ -3,6 +3,13 @@ import AppKit
 import CoreGraphics
 import Foundation
 
+enum ThrottleRate: Double, CaseIterable {
+    case immediate = 0
+    case hz1000 = 0.001
+    case hz500 = 0.002
+    case hz250 = 0.004
+}
+
 final class EventTap {
     var isForwarding = false
     var isConnected = false
@@ -10,10 +17,12 @@ final class EventTap {
     var onForwardingChanged: ((Bool) -> Void)?
     var onEmergencyOff: (() -> Void)?
     var onCaptureFailed: (() -> Void)?
+    var throttleRate: ThrottleRate = .hz1000
 
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var localCursorSuppressed = false
+    private var currentEventStartedAt: UInt64?
 
     @discardableResult
     func start() -> Bool {
@@ -73,17 +82,20 @@ final class EventTap {
         runLoopSource = nil
         isForwarding = false
         isConnected = false
+        clearPendingDelta()
         restoreLocalCursor()
     }
 
     func releaseLocalControl() {
         isForwarding = false
+        flushDelta()
         restoreLocalCursor()
         onForwardingChanged?(false)
     }
 
     func reclaimLocalControlFromRemote() {
         isForwarding = false
+        clearPendingDelta()
         restoreLocalCursor()
 
         let screen = NSScreenFrame.main
@@ -98,6 +110,9 @@ final class EventTap {
             }
             return Unmanaged.passRetained(event)
         }
+
+        currentEventStartedAt = InputMetrics.nowTicks()
+        defer { currentEventStartedAt = nil }
 
         if isEmergencyRelease(type: type, event: event) {
             sendCaptured(.release)
@@ -183,6 +198,41 @@ final class EventTap {
         pinLocalCursor()
     }
 
+    private func flushDelta() {
+        scheduledDeltaFlush?.cancel()
+        scheduledDeltaFlush = nil
+        sendPendingDelta()
+    }
+
+    private func clearPendingDelta() {
+        scheduledDeltaFlush?.cancel()
+        scheduledDeltaFlush = nil
+        pendingDelta = .zero
+        pendingDeltaStartedAt = nil
+    }
+
+    private func sendPendingDelta() {
+        guard pendingDelta.x != 0 || pendingDelta.y != 0 else { return }
+        if let startedAt = pendingDeltaStartedAt {
+            InputMetrics.shared.record(.hidCapture, from: startedAt)
+        }
+        send?(.mouseDelta(dx: pendingDelta.x, dy: pendingDelta.y, button: nil))
+        pendingDelta = .zero
+        pendingDeltaStartedAt = nil
+        lastDeltaSend = CFAbsoluteTimeGetCurrent()
+    }
+
+    private func scheduleDeltaFlush(after delay: TimeInterval) {
+        guard scheduledDeltaFlush == nil else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.scheduledDeltaFlush = nil
+            self?.sendPendingDelta()
+        }
+        scheduledDeltaFlush = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
     private func isKeyboardEnterRemote(type: CGEventType, event: CGEvent) -> Bool {
         guard type == .keyDown else { return false }
         guard event.getIntegerValueField(.keyboardEventKeycode) == 124 else { return false }
@@ -197,11 +247,19 @@ final class EventTap {
         return flags.contains(.maskCommand) && flags.contains(.maskAlternate) && flags.contains(.maskControl)
     }
 
+    private var pendingDelta = CGPoint.zero
+    private var pendingDeltaStartedAt: UInt64?
+    private var lastDeltaSend = CFAbsoluteTime(0)
+    private var scheduledDeltaFlush: DispatchWorkItem?
+    private var deltaThrottle: TimeInterval { throttleRate.rawValue }
     private var pinnedY: Double = 0
     private var lastCursorPinAt = CFAbsoluteTime(0)
     private let cursorPinInterval = 1.0 / 120.0
 
     private func sendCaptured(_ message: WireMessage) {
+        if let startedAt = currentEventStartedAt {
+            InputMetrics.shared.record(.hidCapture, from: startedAt)
+        }
         send?(message)
     }
 
@@ -211,20 +269,40 @@ final class EventTap {
             let dx = event.getDoubleValueField(.mouseEventDeltaX)
             let dy = event.getDoubleValueField(.mouseEventDeltaY)
             if dx != 0 || dy != 0 {
-                sendCaptured(.mouseDelta(dx: dx, dy: dy, button: nil))
+                if pendingDelta.x == 0 && pendingDelta.y == 0 {
+                    pendingDeltaStartedAt = currentEventStartedAt
+                }
+                pendingDelta.x += dx
+                pendingDelta.y += dy
+
+                let now = CFAbsoluteTimeGetCurrent()
+                let elapsed = now - lastDeltaSend
+                if elapsed >= deltaThrottle {
+                    scheduledDeltaFlush?.cancel()
+                    scheduledDeltaFlush = nil
+                    sendPendingDelta()
+                } else {
+                    scheduleDeltaFlush(after: deltaThrottle - elapsed)
+                }
             }
             pinLocalCursorIfNeeded()
         case .leftMouseDown:
+            flushDelta()
             sendCaptured(.mouseDown(button: 0))
         case .leftMouseUp:
+            flushDelta()
             sendCaptured(.mouseUp(button: 0))
         case .rightMouseDown:
+            flushDelta()
             sendCaptured(.mouseDown(button: 1))
         case .rightMouseUp:
+            flushDelta()
             sendCaptured(.mouseUp(button: 1))
         case .otherMouseDown:
+            flushDelta()
             sendCaptured(.mouseDown(button: 2))
         case .otherMouseUp:
+            flushDelta()
             sendCaptured(.mouseUp(button: 2))
         case .scrollWheel:
             let dy = event.getDoubleValueField(.scrollWheelEventDeltaAxis1)

@@ -93,7 +93,10 @@ private final class InputMonitorView: NSView {
 
         super.draw(dirtyRect)
 
-        let snapshots = InputMetrics.shared.snapshots()
+        let allSnapshots = InputMetrics.shared.snapshots()
+        let snapshots = InputMetricID.visibleCases.compactMap { id in
+            allSnapshots.first { $0.id == id }
+        }
         let status = InputMetrics.shared.statusSnapshot()
         let activeSnapshots = snapshots.filter(\.hasSamples)
         let score = qualityScore(for: activeSnapshots)
@@ -107,7 +110,8 @@ private final class InputMonitorView: NSView {
         let footer = NSRect(x: shell.minX + 16, y: body.maxY + 14, width: shell.width - 32, height: 28)
 
         let statusText = status.issue ?? "\(status.state) (\(status.role))"
-        drawText(statusText, in: NSRect(x: footer.minX, y: footer.minY, width: 200, height: 20), font: .systemFont(ofSize: 11, weight: .medium), color: MonitorPalette.muted)
+        drawText(statusText, in: NSRect(x: footer.minX, y: footer.minY, width: 260, height: 20), font: .systemFont(ofSize: 11, weight: .medium), color: MonitorPalette.muted)
+        drawText(status.transport, in: NSRect(x: footer.midX - 190, y: footer.minY, width: 380, height: 20), font: .systemFont(ofSize: 11, weight: .medium), color: transportColor(status.transport), alignment: .center)
         drawText("Quality \(Int(score.rounded()))", in: NSRect(x: footer.maxX - 120, y: footer.minY, width: 120, height: 20), font: .systemFont(ofSize: 11, weight: .medium), color: MonitorPalette.muted, alignment: .right)
         let sidebarWidth = min(230, max(190, body.width * 0.20))
         let detailWidth = min(360, max(300, body.width * 0.30))
@@ -123,7 +127,7 @@ private final class InputMonitorView: NSView {
         )
 
         drawSidebar(in: sidebarRect, status: status, snapshots: snapshots)
-        drawPipeline(in: pipelineRect, snapshots: snapshots)
+        drawPipeline(in: pipelineRect, status: status, snapshots: snapshots)
         drawDetail(in: detailRect, snapshots: activeSnapshots, worst: worst, score: score)
     }
 
@@ -134,6 +138,7 @@ private final class InputMonitorView: NSView {
     private func drawSidebar(in rect: NSRect, status: InputMonitorStatusSnapshot, snapshots: [InputMetricSnapshot]) {
         drawText("Signal", in: NSRect(x: rect.minX + 18, y: rect.minY + 20, width: rect.width - 36, height: 24), font: .systemFont(ofSize: 20, weight: .semibold), color: MonitorPalette.text)
         drawText(status.role, in: NSRect(x: rect.minX + 18, y: rect.minY + 48, width: rect.width - 36, height: 18), font: .systemFont(ofSize: 12, weight: .medium), color: MonitorPalette.muted)
+        drawText(status.transport, in: NSRect(x: rect.minX + 18, y: rect.minY + 66, width: rect.width - 36, height: 16), font: .systemFont(ofSize: 10.5, weight: .medium), color: transportColor(status.transport))
 
         var y = rect.minY + 92
         for stage in InputMetricStage.allCases {
@@ -152,16 +157,16 @@ private final class InputMonitorView: NSView {
         }
     }
 
-    private func drawPipeline(in rect: NSRect, snapshots: [InputMetricSnapshot]) {
+    private func drawPipeline(in rect: NSRect, status: InputMonitorStatusSnapshot, snapshots: [InputMetricSnapshot]) {
         drawText("Pipeline Trace", in: NSRect(x: rect.minX + 20, y: rect.minY + 18, width: 240, height: 24), font: .systemFont(ofSize: 20, weight: .semibold), color: MonitorPalette.text)
-        drawText("p95 latency bars, live on this Mac", in: NSRect(x: rect.minX + 20, y: rect.minY + 45, width: 280, height: 18), font: .systemFont(ofSize: 12, weight: .medium), color: MonitorPalette.muted)
+        drawText("congestion timing, p95, live on this Mac", in: NSRect(x: rect.minX + 20, y: rect.minY + 45, width: 320, height: 18), font: .systemFont(ofSize: 12, weight: .medium), color: MonitorPalette.muted)
 
         let heroRect = NSRect(x: rect.minX + 16, y: rect.minY + 76, width: rect.width - 32, height: min(178, max(142, rect.height * 0.28)))
-        drawTopologyHero(in: heroRect, snapshots: snapshots)
+        drawTopologyHero(in: heroRect, status: status, snapshots: snapshots)
 
         let listTop = heroRect.maxY + 12
         let listHeight = rect.maxY - listTop - 16
-        let rowHeight = min(50, listHeight / CGFloat(InputMetricID.allCases.count))
+        let rowHeight = min(50, listHeight / CGFloat(max(snapshots.count, 1)))
         var y = listTop
 
         for snapshot in snapshots {
@@ -175,8 +180,9 @@ private final class InputMonitorView: NSView {
         case router
     }
 
-    private func drawTopologyHero(in rect: NSRect, snapshots: [InputMetricSnapshot]) {
+    private func drawTopologyHero(in rect: NSRect, status: InputMonitorStatusSnapshot, snapshots: [InputMetricSnapshot]) {
         drawText("LIVE PATH", in: NSRect(x: rect.minX + 18, y: rect.minY + 16, width: 120, height: 16), font: .systemFont(ofSize: 10, weight: .bold), color: MonitorPalette.faint)
+        drawText("iMac -> \(status.transport) -> MacBook Air", in: NSRect(x: rect.minX + 18, y: rect.minY + 34, width: rect.width - 36, height: 20), font: .systemFont(ofSize: 12, weight: .medium), color: transportColor(status.transport))
 
         let nodeWidth = min(136, max(108, (rect.width - 110) / 3))
         let nodeHeight: CGFloat = 80
@@ -186,14 +192,14 @@ private final class InputMonitorView: NSView {
         let receiverRect = NSRect(x: rect.maxX - nodeWidth - 28, y: nodeY, width: nodeWidth, height: nodeHeight)
 
         let controller = stageSummary(.controller, snapshots: snapshots)
-        let network = stageSummary(.network, snapshots: snapshots)
+        let network = snapshots.first { $0.id == .mouseArrivalGap && $0.hasSamples }?.p95
         let receiver = stageSummary(.receiver, snapshots: snapshots)
 
         drawFlow(from: NSPoint(x: controllerRect.maxX, y: controllerRect.midY), to: NSPoint(x: networkRect.minX, y: networkRect.midY))
         drawFlow(from: NSPoint(x: networkRect.maxX, y: networkRect.midY), to: NSPoint(x: receiverRect.minX, y: receiverRect.midY))
 
         drawStageNode(title: "Controller", value: controller, rect: controllerRect, icon: .computer)
-        drawStageNode(title: "WiFi LAN", value: network, rect: networkRect, icon: .router)
+        drawStageNode(title: "Packet gap", value: network, rect: networkRect, icon: .router)
         drawStageNode(title: "Receiver", value: receiver, rect: receiverRect, icon: .computer)
     }
 
@@ -212,42 +218,44 @@ private final class InputMonitorView: NSView {
 
     private func drawComputerIcon(in rect: NSRect) {
         let c = MonitorPalette.faint
-        let screen = NSBezierPath(roundedRect: NSRect(x: rect.minX + 1, y: rect.minY + 7, width: rect.width - 2, height: rect.height - 11), xRadius: 2.5, yRadius: 2.5)
+        let screenRect = NSRect(x: rect.minX + 1, y: rect.minY + 1, width: rect.width - 2, height: rect.height - 12)
+        let screen = NSBezierPath(roundedRect: screenRect, xRadius: 2.5, yRadius: 2.5)
         screen.lineWidth = 1.5
         c.setStroke()
         screen.stroke()
 
         let stand = NSBezierPath()
-        stand.move(to: NSPoint(x: rect.midX - 3, y: rect.minY + 5))
-        stand.line(to: NSPoint(x: rect.midX + 3, y: rect.minY + 5))
-        stand.line(to: NSPoint(x: rect.midX + 2, y: rect.minY + 1))
-        stand.line(to: NSPoint(x: rect.midX - 2, y: rect.minY + 1))
+        stand.move(to: NSPoint(x: rect.midX - 3, y: screenRect.maxY))
+        stand.line(to: NSPoint(x: rect.midX + 3, y: screenRect.maxY))
+        stand.line(to: NSPoint(x: rect.midX + 2, y: rect.maxY - 4))
+        stand.line(to: NSPoint(x: rect.midX - 2, y: rect.maxY - 4))
         stand.close()
         c.withAlphaComponent(0.45).setFill()
         stand.fill()
 
-        let base = NSBezierPath(roundedRect: NSRect(x: rect.midX - 9, y: rect.minY - 1, width: 18, height: 2.5), xRadius: 1, yRadius: 1)
+        let base = NSBezierPath(roundedRect: NSRect(x: rect.midX - 9, y: rect.maxY - 3, width: 18, height: 2.5), xRadius: 1, yRadius: 1)
         c.withAlphaComponent(0.25).setFill()
         base.fill()
     }
 
     private func drawRouterIcon(in rect: NSRect) {
         let c = MonitorPalette.faint
-        let body = NSBezierPath(roundedRect: NSRect(x: rect.minX + 3, y: rect.minY + 4, width: rect.width - 6, height: rect.height * 0.5), xRadius: 3.5, yRadius: 3.5)
+        let bodyRect = NSRect(x: rect.minX + 3, y: rect.maxY - rect.height * 0.5 - 4, width: rect.width - 6, height: rect.height * 0.5)
+        let body = NSBezierPath(roundedRect: bodyRect, xRadius: 3.5, yRadius: 3.5)
         body.lineWidth = 1.5
         c.setStroke()
         body.stroke()
 
         let ant1 = NSBezierPath()
-        ant1.move(to: NSPoint(x: rect.minX + rect.width * 0.3, y: rect.minY + rect.height * 0.5 + 4))
-        ant1.line(to: NSPoint(x: rect.minX + rect.width * 0.22, y: rect.maxY))
+        ant1.move(to: NSPoint(x: rect.minX + rect.width * 0.3, y: bodyRect.minY))
+        ant1.line(to: NSPoint(x: rect.minX + rect.width * 0.22, y: rect.minY))
         ant1.lineWidth = 1.5
         c.withAlphaComponent(0.45).setStroke()
         ant1.stroke()
 
         let ant2 = NSBezierPath()
-        ant2.move(to: NSPoint(x: rect.minX + rect.width * 0.7, y: rect.minY + rect.height * 0.5 + 4))
-        ant2.line(to: NSPoint(x: rect.minX + rect.width * 0.78, y: rect.maxY))
+        ant2.move(to: NSPoint(x: rect.minX + rect.width * 0.7, y: bodyRect.minY))
+        ant2.line(to: NSPoint(x: rect.minX + rect.width * 0.78, y: rect.minY))
         ant2.lineWidth = 1.5
         c.withAlphaComponent(0.45).setStroke()
         ant2.stroke()
@@ -286,13 +294,13 @@ private final class InputMonitorView: NSView {
         drawBars(values: metric?.values ?? [], metric: metric?.id ?? .lanRTT, in: NSRect(x: traceRect.minX + 16, y: traceRect.minY + 50, width: traceRect.width - 32, height: 70), compact: false)
 
         if score > 0, let metric {
-            drawText("P95 \(format(milliseconds: metric.p95))", in: NSRect(x: traceRect.minX + 16, y: traceRect.maxY - 22, width: 120, height: 16), font: .systemFont(ofSize: 10, weight: .medium), color: MonitorPalette.faint)
+            drawText("P95 \(format(value: metric.p95, for: metric.id))", in: NSRect(x: traceRect.minX + 16, y: traceRect.maxY - 22, width: 120, height: 16), font: .systemFont(ofSize: 10, weight: .medium), color: MonitorPalette.faint)
         }
 
         drawText("Bottleneck", in: NSRect(x: rect.minX + 18, y: rect.maxY - 38, width: 100, height: 20), font: .systemFont(ofSize: 13, weight: .semibold), color: MonitorPalette.text)
 
         if let worst {
-            let text = "\(worst.id.title) is currently the roughest stage at p95 \(format(milliseconds: worst.p95))."
+            let text = "\(worst.id.title) is currently the roughest stage at p95 \(format(value: worst.p95, for: worst.id))."
             drawText(text, in: NSRect(x: rect.minX + 110, y: rect.maxY - 38, width: rect.width - 130, height: 20), font: .systemFont(ofSize: 12, weight: .regular), color: MonitorPalette.muted, lineBreak: .byWordWrapping)
         } else {
             drawText("Move the mouse through the remote screen to start the trace.", in: NSRect(x: rect.minX + 18, y: rect.maxY - 38, width: rect.width - 36, height: 20), font: .systemFont(ofSize: 12, weight: .regular), color: MonitorPalette.muted, lineBreak: .byWordWrapping)
@@ -306,7 +314,7 @@ private final class InputMonitorView: NSView {
         let statsX = rect.maxX - 124
         if snapshot.hasSamples {
             drawText("P95", in: NSRect(x: statsX, y: rect.minY + 9, width: 42, height: 14), font: .systemFont(ofSize: 9, weight: .bold), color: MonitorPalette.faint)
-            drawText(format(milliseconds: snapshot.p95), in: NSRect(x: statsX, y: rect.minY + 23, width: 98, height: 24), font: .monospacedDigitSystemFont(ofSize: 18, weight: .semibold), color: MonitorPalette.text)
+            drawText(format(value: snapshot.p95, for: snapshot.id), in: NSRect(x: statsX, y: rect.minY + 23, width: 98, height: 24), font: .monospacedDigitSystemFont(ofSize: 18, weight: .semibold), color: MonitorPalette.text)
         } else {
             drawText("No samples", in: NSRect(x: statsX, y: rect.minY + 20, width: 100, height: 18), font: .systemFont(ofSize: 12, weight: .medium), color: MonitorPalette.faint)
         }
@@ -323,9 +331,9 @@ private final class InputMonitorView: NSView {
                 return [("P50", "-"), ("P95", "-"), ("MAX", "-"), ("N", "0")]
             }
             return [
-                ("P50", format(milliseconds: snapshot.p50)),
-                ("P95", format(milliseconds: snapshot.p95)),
-                ("MAX", format(milliseconds: snapshot.max)),
+                ("P50", format(value: snapshot.p50, for: snapshot.id)),
+                ("P95", format(value: snapshot.p95, for: snapshot.id)),
+                ("MAX", format(value: snapshot.max, for: snapshot.id)),
                 ("N", "\(snapshot.count)")
             ]
         }()
@@ -519,13 +527,29 @@ private func format(milliseconds: Double) -> String {
     return String(format: "%.0fms", milliseconds)
 }
 
+private func format(value: Double, for metric: InputMetricID) -> String {
+    format(milliseconds: value)
+}
+
 private func stageSummary(_ stage: InputMetricStage, snapshots: [InputMetricSnapshot]) -> Double? {
     let stageSnapshots = snapshots.filter { $0.id.stage == stage && $0.hasSamples }
-    guard !stageSnapshots.isEmpty else { return nil }
-    let total = stageSnapshots.reduce(0.0) { partial, snapshot in
-        partial + snapshot.p95
+    return stageSnapshots.min { lhs, rhs in
+        qualityScore(for: lhs) < qualityScore(for: rhs)
+    }?.p95
+}
+
+private func transportColor(_ transport: String) -> NSColor {
+    let value = transport.lowercased()
+    if value.contains("direct") || value.contains("awdl") || value.contains("peer") {
+        return MonitorPalette.green
     }
-    return total / Double(stageSnapshots.count)
+    if value.contains("ethernet") {
+        return MonitorPalette.cyan
+    }
+    if value.contains("router") || value.contains("wifi") {
+        return MonitorPalette.yellow
+    }
+    return MonitorPalette.muted
 }
 
 private func valueColor(_ value: Double, metric: InputMetricID) -> NSColor {

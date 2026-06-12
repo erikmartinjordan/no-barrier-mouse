@@ -7,67 +7,42 @@ final class RemoteInput {
     var onReleaseRequested: (() -> Void)?
     var onInputPostingBlocked: (() -> Void)?
 
-    private let inputQueue = DispatchQueue(label: "NoBarrierMouse.RemoteInput", qos: .userInteractive)
     private lazy var eventSource = CGEventSource(stateID: .hidSystemState)
     private let doubleClickInterval = NSEvent.doubleClickInterval
-
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
     private var didRequestRelease = false
     private var isRemoteActive = false
     private lazy var cursorPoint: CGPoint = currentMousePoint()
-    private let mouseDeltaLock = NSLock()
-    private var pendingMouseDelta = CGPoint.zero
-    private var mouseTickTimer: DispatchSourceTimer?
-    private var emptyMouseTicks = 0
+    private var lastMouseArrivalAt: UInt64?
+    private var lastMouseApplyAt: UInt64?
+    private var benchmarkRecorder: MouseBenchmarkRecorder?
     private var cachedTrust = AXIsProcessTrusted()
     private var nextTrustCheck = CFAbsoluteTime(0)
-    private let mouseTickInterval = 1.0 / 240.0
-    private let maxEmptyMouseTicks = 12
 
     private var mainScreen: CGRect {
         CGDisplayBounds(CGMainDisplayID())
     }
 
-    func apply(_ message: WireMessage) {
-        if case .mouseDelta(let dx, let dy, _) = message {
-            enqueueMouseDelta(dx: dx, dy: dy)
-            return
-        }
+    func apply(_ message: WireMessage, receivedAt: UInt64 = InputMetrics.nowTicks()) {
+        InputMetrics.shared.record(.receiverQueue, from: receivedAt)
 
-        switch message {
-        case .activate, .enter, .release, .returnControl:
-            clearPendingMouseDelta()
-            inputQueue.async {
-                self.applyOnInputQueue(message)
-            }
-        default:
-            let pendingDelta = takePendingMouseDelta()
-            inputQueue.async {
-                if self.isRemoteActive {
-                    self.applyMouseDelta(pendingDelta)
-                }
-                self.applyOnInputQueue(message)
-            }
-        }
-    }
-
-    func reset() {
-        inputQueue.sync {
-            self.isRemoteActive = false
-            self.pressedButton = nil
-            self.didRequestRelease = false
-            self.emptyMouseTicks = 0
-            self.stopMouseTickTimer()
-        }
-        clearPendingMouseDelta()
-    }
-
-    private func applyOnInputQueue(_ message: WireMessage) {
         switch message {
         case .mouseDelta(let dx, let dy, _):
-            enqueueMouseDelta(dx: dx, dy: dy)
+            recordMouseArrival(receivedAt)
+            guard isRemoteActive else { return }
+            _ = moveMouse(dx: dx, dy: dy)
+        case .benchmarkStart(let id, let sampleRate, let sampleCount, let transport):
+            startBenchmark(id: id, sampleRate: sampleRate, sampleCount: sampleCount, transport: transport)
+        case .benchmarkDelta(_, let sequence, let sentMilliseconds, let dx, let dy):
+            recordMouseArrival(receivedAt)
+            guard isRemoteActive else { return }
+            if let appliedAt = moveMouse(dx: dx, dy: dy) {
+                benchmarkRecorder?.record(sequence: sequence, sentMilliseconds: sentMilliseconds, dx: dx, dy: dy, receivedAt: receivedAt, appliedAt: appliedAt, point: cursorPoint)
+            }
+        case .benchmarkEnd(let id):
+            finishBenchmark(id: id, reason: "completed")
         case .mouseDown(let button):
             guard isRemoteActive, canPostInputEvents() else { return }
             postMouse(button: button, down: true)
@@ -76,18 +51,21 @@ final class RemoteInput {
             postMouse(button: button, down: false)
         case .scroll(let dx, let dy):
             guard isRemoteActive, canPostInputEvents() else { return }
+            let postStartedAt = InputMetrics.nowTicks()
             let event = CGEvent(scrollWheelEvent2Source: eventSource, units: .line, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
-            event?.post(tap: .cghidEventTap)
+            post(event, startedAt: postStartedAt)
         case .key(let code, let down, let flags):
             guard isRemoteActive, canPostInputEvents() else { return }
+            let postStartedAt = InputMetrics.nowTicks()
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: down)
             event?.flags = CGEventFlags(wireValue: flags)
-            event?.post(tap: .cghidEventTap)
+            post(event, startedAt: postStartedAt)
         case .flags(let code, let flags):
             guard isRemoteActive, canPostInputEvents() else { return }
+            let postStartedAt = InputMetrics.nowTicks()
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: true)
             event?.flags = CGEventFlags(wireValue: flags)
-            event?.post(tap: .cghidEventTap)
+            post(event, startedAt: postStartedAt)
         case .activate:
             enterFromLeftEdge(at: mainScreen.midY)
         case .enter(let y):
@@ -97,96 +75,33 @@ final class RemoteInput {
         case .returnControl:
             leaveRemote()
             onReleaseRequested?()
-        case .hello:
+        case .hello, .ping, .pong, .benchmarkRequestNWConnection, .benchmarkRequestRawSocket:
             break
         }
     }
 
-    private func enqueueMouseDelta(dx: Double, dy: Double) {
-        mouseDeltaLock.lock()
-        pendingMouseDelta.x += dx
-        pendingMouseDelta.y += dy
-        mouseDeltaLock.unlock()
-
-        mouseDeltaSignal.add(data: 1)
-    }
-
-    private lazy var mouseDeltaSignal: DispatchSourceUserDataAdd = {
-        let source = DispatchSource.makeUserDataAddSource(queue: inputQueue)
-        source.setEventHandler { [weak self] in
-            self?.ensureMouseTickTimer()
-        }
-        source.resume()
-        return source
-    }()
-
-    private func takePendingMouseDelta() -> CGPoint {
-        mouseDeltaLock.lock()
-        let delta = pendingMouseDelta
-        pendingMouseDelta = .zero
-        mouseDeltaLock.unlock()
-        return delta
-    }
-
-    private func clearPendingMouseDelta() {
-        mouseDeltaLock.lock()
-        pendingMouseDelta = .zero
-        mouseDeltaLock.unlock()
-    }
-
-    private func ensureMouseTickTimer() {
-        guard mouseTickTimer == nil else { return }
-
-        let timer = DispatchSource.makeTimerSource(flags: .strict, queue: inputQueue)
-        timer.schedule(deadline: .now(), repeating: mouseTickInterval, leeway: .microseconds(500))
-        timer.setEventHandler { [weak self] in
-            self?.drainMouseTick()
-        }
-        mouseTickTimer = timer
-        timer.resume()
-    }
-
-    private func stopMouseTickTimer() {
-        mouseTickTimer?.cancel()
-        mouseTickTimer = nil
-    }
-
-    private func drainMouseTick() {
-        let delta = takePendingMouseDelta()
-        if !isRemoteActive {
-            emptyMouseTicks += 1
-            if emptyMouseTicks >= maxEmptyMouseTicks {
-                stopMouseTickTimer()
-                emptyMouseTicks = 0
-            }
-            return
-        }
-
-        if delta.x == 0 && delta.y == 0 {
-            emptyMouseTicks += 1
-            if emptyMouseTicks >= maxEmptyMouseTicks {
-                stopMouseTickTimer()
-                emptyMouseTicks = 0
-            }
-            return
-        }
-
-        emptyMouseTicks = 0
-        moveMouse(dx: delta.x, dy: delta.y)
-    }
-
-    private func applyMouseDelta(_ delta: CGPoint) {
-        guard delta.x != 0 || delta.y != 0 else { return }
-        moveMouse(dx: delta.x, dy: delta.y)
-    }
-
-    private func leaveRemote() {
+    func reset() {
         isRemoteActive = false
         pressedButton = nil
         didRequestRelease = false
-        emptyMouseTicks = 0
-        stopMouseTickTimer()
-        clearPendingMouseDelta()
+        lastMouseArrivalAt = nil
+        lastMouseApplyAt = nil
+        _ = benchmarkRecorder?.finish(reason: "reset")
+        benchmarkRecorder = nil
+    }
+
+    private func recordMouseArrival(_ receivedAt: UInt64) {
+        if let lastMouseArrivalAt {
+            InputMetrics.shared.record(.mouseArrivalGap, from: lastMouseArrivalAt, to: receivedAt)
+        }
+        lastMouseArrivalAt = receivedAt
+    }
+
+    private func recordMouseApplyGap(_ startedAt: UInt64) {
+        if let lastMouseApplyAt {
+            InputMetrics.shared.record(.mouseApplyGap, from: lastMouseApplyAt, to: startedAt)
+        }
+        lastMouseApplyAt = startedAt
     }
 
     private func canPostInputEvents() -> Bool {
@@ -206,18 +121,22 @@ final class RemoteInput {
         CGEvent(source: nil)?.location ?? CGPoint(x: mainScreen.midX, y: mainScreen.midY)
     }
 
-    private func moveMouse(dx: Double, dy: Double) {
+    private func moveMouse(dx: Double, dy: Double) -> UInt64? {
         let screen = mainScreen
         cursorPoint.x = min(max(cursorPoint.x + dx, screen.minX), screen.maxX - 2)
         cursorPoint.y = min(max(cursorPoint.y + dy, screen.minY), screen.maxY - 2)
 
         if cursorPoint.x <= screen.minX + 1 {
             requestReleaseIfNeeded()
-            return
+            return nil
         }
 
         didRequestRelease = false
-        movedEvent(at: cursorPoint, dx: dx, dy: dy)
+        let postStartedAt = InputMetrics.nowTicks()
+        recordMouseApplyGap(postStartedAt)
+        postMove(at: cursorPoint, startedAt: postStartedAt)
+        InputMetrics.shared.record(.mouseApplyTick, from: postStartedAt)
+        return postStartedAt
     }
 
     private func requestReleaseIfNeeded() {
@@ -227,15 +146,13 @@ final class RemoteInput {
         onReleaseRequested?()
     }
 
-    private func movedEvent(at point: CGPoint, dx: Double, dy: Double) {
+    private func postMove(at point: CGPoint, startedAt: UInt64) {
         guard canPostInputEvents() else { return }
+
         let type: CGEventType
         let button: CGMouseButton
 
         switch pressedButton {
-        case 0:
-            type = .leftMouseDragged
-            button = .left
         case 1:
             type = .rightMouseDragged
             button = .right
@@ -243,25 +160,59 @@ final class RemoteInput {
             type = .otherMouseDragged
             button = .center
         default:
-            type = .mouseMoved
+            type = pressedButton == nil ? .mouseMoved : .leftMouseDragged
             button = .left
         }
 
         let event = CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: point, mouseButton: button)
-        event?.setIntegerValueField(.mouseEventDeltaX, value: Int64(dx.rounded()))
-        event?.setIntegerValueField(.mouseEventDeltaY, value: Int64(dy.rounded()))
-        event?.post(tap: .cghidEventTap)
+        post(event, startedAt: startedAt)
     }
 
     private func enterFromLeftEdge(at y: Double) {
         let screen = mainScreen
-        clearPendingMouseDelta()
-        emptyMouseTicks = 0
         isRemoteActive = true
+        pressedButton = nil
         didRequestRelease = false
+        lastMouseArrivalAt = nil
+        lastMouseApplyAt = nil
         cursorPoint = CGPoint(x: screen.minX + 5, y: min(max(y, screen.minY + 5), screen.maxY - 5))
+
+        let postStartedAt = InputMetrics.nowTicks()
         CGWarpMouseCursorPosition(cursorPoint)
-        movedEvent(at: cursorPoint, dx: 0, dy: 0)
+        postMove(at: cursorPoint, startedAt: postStartedAt)
+    }
+
+    private func leaveRemote() {
+        isRemoteActive = false
+        pressedButton = nil
+        didRequestRelease = false
+        lastMouseArrivalAt = nil
+        lastMouseApplyAt = nil
+    }
+
+    private func startBenchmark(id: UInt32, sampleRate: UInt16, sampleCount: UInt16, transport: String) {
+        _ = benchmarkRecorder?.finish(reason: "replaced")
+        benchmarkRecorder = MouseBenchmarkRecorder(id: id, sampleRate: sampleRate, expectedSamples: sampleCount, transport: transport)
+
+        let screen = mainScreen
+        isRemoteActive = true
+        pressedButton = nil
+        didRequestRelease = false
+        lastMouseArrivalAt = nil
+        lastMouseApplyAt = nil
+        cursorPoint = CGPoint(x: screen.midX, y: screen.midY)
+
+        let postStartedAt = InputMetrics.nowTicks()
+        CGWarpMouseCursorPosition(cursorPoint)
+        postMove(at: cursorPoint, startedAt: postStartedAt)
+    }
+
+    private func finishBenchmark(id: UInt32, reason: String) {
+        guard benchmarkRecorder != nil else { return }
+        _ = benchmarkRecorder?.finish(reason: reason)
+        benchmarkRecorder = nil
+        lastMouseArrivalAt = nil
+        lastMouseApplyAt = nil
     }
 
     private func postMouse(button: Int, down: Bool) {
@@ -281,6 +232,7 @@ final class RemoteInput {
             cgButton = .left
         }
 
+        let postStartedAt = InputMetrics.nowTicks()
         if let event = CGEvent(mouseEventSource: eventSource, mouseType: type, mouseCursorPosition: point, mouseButton: cgButton) {
             pressedButton = down ? button : nil
 
@@ -297,7 +249,13 @@ final class RemoteInput {
                 event.setIntegerValueField(.mouseEventClickState, value: Int64(lastClickCount))
             }
 
-            event.post(tap: .cghidEventTap)
+            post(event, startedAt: postStartedAt)
         }
+    }
+
+    private func post(_ event: CGEvent?, startedAt: UInt64) {
+        guard let event else { return }
+        event.post(tap: .cghidEventTap)
+        InputMetrics.shared.record(.cgEventPost, from: startedAt)
     }
 }

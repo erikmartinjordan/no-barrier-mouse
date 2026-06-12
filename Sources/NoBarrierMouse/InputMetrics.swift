@@ -13,10 +13,25 @@ enum InputMetricID: CaseIterable, Hashable {
     case tcpSerializeSend
     case tcpSendCompletion
     case lanRTT
+    case mouseArrivalGap
+    case mouseApplyGap
     case tcpReceiveDecode
     case receiverQueue
     case mouseApplyTick
     case cgEventPost
+    case cgWarp
+    case receiveCallback
+
+    static let visibleCases: [InputMetricID] = [
+        .hidCapture,
+        .tcpSerializeSend,
+        .mouseArrivalGap,
+        .receiverQueue,
+        .mouseApplyGap,
+        .cgEventPost,
+        .cgWarp,
+        .receiveCallback
+    ]
 
     var title: String {
         switch self {
@@ -29,7 +44,11 @@ enum InputMetricID: CaseIterable, Hashable {
         case .tcpSendCompletion:
             return "TCP completion"
         case .lanRTT:
-            return "WiFi LAN RTT"
+            return "Transport RTT"
+        case .mouseArrivalGap:
+            return "Mouse packet gap"
+        case .mouseApplyGap:
+            return "Cursor update gap"
         case .tcpReceiveDecode:
             return "Receive + decode"
         case .receiverQueue:
@@ -38,6 +57,10 @@ enum InputMetricID: CaseIterable, Hashable {
             return "Mouse apply tick"
         case .cgEventPost:
             return "CGEvent post"
+        case .cgWarp:
+            return "CGWarp"
+        case .receiveCallback:
+            return "Receive callback"
         }
     }
 
@@ -52,7 +75,11 @@ enum InputMetricID: CaseIterable, Hashable {
         case .tcpSendCompletion:
             return "NWConnection contentProcessed callback"
         case .lanRTT:
-            return "App ping/pong round trip"
+            return "App ping/pong over active path"
+        case .mouseArrivalGap:
+            return "Gap between movement packets"
+        case .mouseApplyGap:
+            return "Gap between posted cursor updates"
         case .tcpReceiveDecode:
             return "Socket read buffer and wire decode"
         case .receiverQueue:
@@ -61,6 +88,10 @@ enum InputMetricID: CaseIterable, Hashable {
             return "Buffered delta drain and cursor update"
         case .cgEventPost:
             return "CGEvent creation and HID post"
+        case .cgWarp:
+            return "CGWarpMouseCursorPosition"
+        case .receiveCallback:
+            return "Total time in receive callback on serial queue"
         }
     }
 
@@ -68,9 +99,9 @@ enum InputMetricID: CaseIterable, Hashable {
         switch self {
         case .hidCapture, .tcpQueue, .tcpSerializeSend:
             return .controller
-        case .tcpSendCompletion, .lanRTT:
+        case .tcpSendCompletion, .lanRTT, .mouseArrivalGap:
             return .network
-        case .tcpReceiveDecode, .receiverQueue, .mouseApplyTick, .cgEventPost:
+        case .mouseApplyGap, .tcpReceiveDecode, .receiverQueue, .mouseApplyTick, .cgEventPost, .cgWarp, .receiveCallback:
             return .receiver
         }
     }
@@ -87,6 +118,10 @@ enum InputMetricID: CaseIterable, Hashable {
             return 2.0
         case .lanRTT:
             return 10.0
+        case .mouseArrivalGap:
+            return 8.5
+        case .mouseApplyGap:
+            return 8.5
         case .tcpReceiveDecode:
             return 0.35
         case .receiverQueue:
@@ -95,6 +130,10 @@ enum InputMetricID: CaseIterable, Hashable {
             return 2.0
         case .cgEventPost:
             return 0.75
+        case .cgWarp:
+            return 0.20
+        case .receiveCallback:
+            return 1.0
         }
     }
 
@@ -110,6 +149,10 @@ enum InputMetricID: CaseIterable, Hashable {
             return 8.0
         case .lanRTT:
             return 30.0
+        case .mouseArrivalGap:
+            return 16.7
+        case .mouseApplyGap:
+            return 16.7
         case .tcpReceiveDecode:
             return 1.5
         case .receiverQueue:
@@ -118,6 +161,10 @@ enum InputMetricID: CaseIterable, Hashable {
             return 6.0
         case .cgEventPost:
             return 3.0
+        case .cgWarp:
+            return 1.0
+        case .receiveCallback:
+            return 4.0
         }
     }
 }
@@ -143,6 +190,7 @@ struct InputMonitorStatusSnapshot {
     let state: String
     let role: String
     let connected: Bool
+    let transport: String
     let issue: String?
 }
 
@@ -157,7 +205,7 @@ final class InputMetrics {
     private let lock = NSLock()
     private let maxSamples = 720
     private var samples: [InputMetricID: [Sample]] = [:]
-    private var status = InputMonitorStatusSnapshot(state: "Off", role: "No role", connected: false, issue: nil)
+    private var status = InputMonitorStatusSnapshot(state: "Off", role: "No role", connected: false, transport: "No transport", issue: nil)
 
     private init() {}
 
@@ -193,7 +241,19 @@ final class InputMetrics {
 
     func setStatus(state: String, role: String, connected: Bool, issue: String?) {
         lock.lock()
-        status = InputMonitorStatusSnapshot(state: state, role: role, connected: connected, issue: issue)
+        status = InputMonitorStatusSnapshot(state: state, role: role, connected: connected, transport: status.transport, issue: issue)
+        lock.unlock()
+    }
+
+    func setTransport(_ transport: String) {
+        lock.lock()
+        status = InputMonitorStatusSnapshot(
+            state: status.state,
+            role: status.role,
+            connected: status.connected,
+            transport: transport,
+            issue: status.issue
+        )
         lock.unlock()
     }
 
@@ -254,11 +314,101 @@ final class InputMetrics {
         }
     }
 
+    func diagnosticReport() -> String {
+        let status = statusSnapshot()
+        let all = snapshots()
+        let visible = InputMetricID.visibleCases.compactMap { id in
+            all.first { $0.id == id }
+        }
+        let active = visible.filter(\.hasSamples)
+        let worst = active.max { lhs, rhs in
+            normalizedSeverity(lhs) < normalizedSeverity(rhs)
+        }
+
+        var lines: [String] = []
+        lines.append("No Barrier Mouse diagnostic")
+        lines.append("State: \(status.state)")
+        lines.append("Role: \(status.role)")
+        lines.append("Transport: \(status.transport)")
+        if let issue = status.issue {
+            lines.append("Issue: \(issue)")
+        }
+        lines.append("")
+        lines.append("Visible metrics:")
+
+        for snapshot in visible {
+            if snapshot.hasSamples {
+                lines.append("- \(snapshot.id.title): p50 \(formatDiagnostic(snapshot.p50)), p95 \(formatDiagnostic(snapshot.p95)), max \(formatDiagnostic(snapshot.max)), n \(snapshot.count)")
+            } else {
+                lines.append("- \(snapshot.id.title): no samples")
+            }
+        }
+
+        lines.append("")
+        if let worst {
+            lines.append("Most likely bottleneck: \(worst.id.title) at p95 \(formatDiagnostic(worst.p95))")
+            lines.append("Interpretation: \(diagnosticHint(for: worst.id))")
+        } else {
+            lines.append("Most likely bottleneck: no movement samples yet")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
     private static let timebase: mach_timebase_info_data_t = {
         var info = mach_timebase_info_data_t()
         mach_timebase_info(&info)
         return info
     }()
+}
+
+private func normalizedSeverity(_ snapshot: InputMetricSnapshot) -> Double {
+    guard snapshot.hasSamples else { return 0 }
+    return snapshot.p95 / max(snapshot.id.goodMilliseconds, 0.001)
+}
+
+private func formatDiagnostic(_ milliseconds: Double) -> String {
+    if milliseconds <= 0 {
+        return "-"
+    }
+    if milliseconds < 1 {
+        return "\(Int((milliseconds * 1000).rounded()))us"
+    }
+    if milliseconds < 10 {
+        return String(format: "%.1fms", milliseconds)
+    }
+    return String(format: "%.0fms", milliseconds)
+}
+
+private func diagnosticHint(for id: InputMetricID) -> String {
+    switch id {
+    case .hidCapture:
+        return "The controller is slow to capture HID events."
+    case .tcpQueue:
+        return "Input is waiting behind other TCP sends."
+    case .tcpSerializeSend:
+        return "The controller is slow to encode or submit network packets."
+    case .tcpSendCompletion:
+        return "TCP completion callbacks are delayed; this is usually less important than packet cadence."
+    case .lanRTT:
+        return "Round-trip transport latency is high, but this is not the main mouse smoothness metric."
+    case .mouseArrivalGap:
+        return "Movement packets are arriving unevenly; this usually feels like network or sender cadence jitter."
+    case .mouseApplyGap:
+        return "Cursor updates are not being posted evenly on the receiver."
+    case .tcpReceiveDecode:
+        return "The receiver is slow to read or decode packets."
+    case .receiverQueue:
+        return "The receiver is waiting too long before executing input work."
+    case .mouseApplyTick:
+        return "The receiver cursor update itself is slow."
+    case .cgEventPost:
+        return "macOS event posting is slow on the receiver."
+    case .cgWarp:
+        return "The CGWarpMouseCursorPosition call is slow on the receiver."
+    case .receiveCallback:
+        return "The total receive callback execution is too long."
+    }
 }
 
 private func percentile(_ sortedValues: [Double], _ percentile: Double) -> Double {

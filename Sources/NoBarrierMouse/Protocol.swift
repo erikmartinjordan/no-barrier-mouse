@@ -13,6 +13,13 @@ enum WireMessage: Equatable {
     case enter(y: Double)
     case release
     case returnControl
+    case ping(id: UInt32, sentAt: UInt64)
+    case pong(id: UInt32, sentAt: UInt64)
+    case benchmarkStart(id: UInt32, sampleRate: UInt16, sampleCount: UInt16, transport: String)
+    case benchmarkDelta(id: UInt32, sequence: UInt32, sentMilliseconds: Double, dx: Double, dy: Double)
+    case benchmarkEnd(id: UInt32)
+    case benchmarkRequestNWConnection
+    case benchmarkRequestRawSocket(host: String, port: UInt16)
 
     enum PeerRole: String {
         case controller
@@ -61,6 +68,36 @@ final class WireCodec {
             data.appendByte(9)
         case .returnControl:
             data.appendByte(10)
+        case .ping(let id, let sentAt):
+            data.appendByte(11)
+            data.appendUInt32LE(id)
+            data.appendUInt64LE(sentAt)
+        case .pong(let id, let sentAt):
+            data.appendByte(12)
+            data.appendUInt32LE(id)
+            data.appendUInt64LE(sentAt)
+        case .benchmarkStart(let id, let sampleRate, let sampleCount, let transport):
+            data.appendByte(13)
+            data.appendUInt32LE(id)
+            data.appendUInt16LE(sampleRate)
+            data.appendUInt16LE(sampleCount)
+            data.appendString(transport)
+        case .benchmarkDelta(let id, let sequence, let sentMilliseconds, let dx, let dy):
+            data.appendByte(14)
+            data.appendUInt32LE(id)
+            data.appendUInt32LE(sequence)
+            data.appendFloat32LE(Float32(sentMilliseconds))
+            data.appendFloat32LE(Float32(dx))
+            data.appendFloat32LE(Float32(dy))
+        case .benchmarkEnd(let id):
+            data.appendByte(15)
+            data.appendUInt32LE(id)
+        case .benchmarkRequestNWConnection:
+            data.appendByte(16)
+        case .benchmarkRequestRawSocket(let host, let port):
+            data.appendByte(17)
+            data.appendString(host)
+            data.appendUInt16LE(port)
         }
         return data
     }
@@ -107,6 +144,36 @@ final class WireCodec {
             return .release
         case 10:
             return .returnControl
+        case 11:
+            guard let id = data.readUInt32LE(at: &offset),
+                  let sentAt = data.readUInt64LE(at: &offset) else { return nil }
+            return .ping(id: id, sentAt: sentAt)
+        case 12:
+            guard let id = data.readUInt32LE(at: &offset),
+                  let sentAt = data.readUInt64LE(at: &offset) else { return nil }
+            return .pong(id: id, sentAt: sentAt)
+        case 13:
+            guard let id = data.readUInt32LE(at: &offset),
+                  let sampleRate = data.readUInt16LE(at: &offset),
+                  let sampleCount = data.readUInt16LE(at: &offset),
+                  let transport = data.readString(at: &offset) else { return nil }
+            return .benchmarkStart(id: id, sampleRate: sampleRate, sampleCount: sampleCount, transport: transport)
+        case 14:
+            guard let id = data.readUInt32LE(at: &offset),
+                  let sequence = data.readUInt32LE(at: &offset),
+                  let sentMilliseconds = data.readFloat32LE(at: &offset),
+                  let dx = data.readFloat32LE(at: &offset),
+                  let dy = data.readFloat32LE(at: &offset) else { return nil }
+            return .benchmarkDelta(id: id, sequence: sequence, sentMilliseconds: Double(sentMilliseconds), dx: Double(dx), dy: Double(dy))
+        case 15:
+            guard let id = data.readUInt32LE(at: &offset) else { return nil }
+            return .benchmarkEnd(id: id)
+        case 16:
+            return .benchmarkRequestNWConnection
+        case 17:
+            guard let host = data.readString(at: &offset),
+                  let port = data.readUInt16LE(at: &offset) else { return nil }
+            return .benchmarkRequestRawSocket(host: host, port: port)
         default:
             return nil
         }
@@ -173,6 +240,17 @@ extension Data {
         return v
     }
 
+    func readUInt32LE(at offset: inout Int) -> UInt32? {
+        guard offset + 4 <= count else { return nil }
+        let byte0 = UInt32(self[offset])
+        let byte1 = UInt32(self[offset + 1]) << 8
+        let byte2 = UInt32(self[offset + 2]) << 16
+        let byte3 = UInt32(self[offset + 3]) << 24
+        let v = byte0 | byte1 | byte2 | byte3
+        offset += 4
+        return v
+    }
+
     func readUInt64LE(at offset: inout Int) -> UInt64? {
         guard offset + 8 <= count else { return nil }
         let byte0 = UInt64(self[offset])
@@ -189,12 +267,7 @@ extension Data {
     }
 
     func readFloat32LE(at offset: inout Int) -> Float32? {
-        guard offset + 4 <= count else { return nil }
-        let bits = UInt32(self[offset]) |
-                   UInt32(self[offset + 1]) << 8 |
-                   UInt32(self[offset + 2]) << 16 |
-                   UInt32(self[offset + 3]) << 24
-        offset += 4
+        guard let bits = readUInt32LE(at: &offset) else { return nil }
         return Float32(bitPattern: bits)
     }
 
