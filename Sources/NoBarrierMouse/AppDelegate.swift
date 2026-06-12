@@ -12,7 +12,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let eventTap = EventTap()
     private let remoteInput = RemoteInput()
     private let roleSelectionController = RoleSelectionController()
-    private lazy var statsController = StatsWindowController()
 
     private var isOn = false
     private var role: AppRole?
@@ -75,10 +74,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(inputItem)
         inputMonitoringItem = inputItem
         menu.addItem(NSMenuItem.separator())
-        let statsItem = NSMenuItem(title: "Statistics...", action: #selector(showStats), keyEquivalent: "")
-        statsItem.target = self
-        menu.addItem(statsItem)
-        menu.addItem(NSMenuItem.separator())
         menu.addItem(quitItem)
         statusItem.menu = menu
     }
@@ -91,14 +86,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.eventTap.releaseLocalControl()
             }
         }
-        network.onMessage = { [weak self] message, receivedAt in
-            self?.handleNetworkMessage(message, receivedAt: receivedAt)
+        network.onMessage = { [weak self] message in
+            self?.handleNetworkMessage(message)
         }
         remoteInput.onInputPostingBlocked = { [weak self] in
             DispatchQueue.main.async {
-                self?.accessibilityProblem = true
-                self?.startAccessibilityTimer()
-                self?.updateAppearance()
+                guard let self else { return }
+                if self.role == .receiver {
+                    self.network.send(.returnControl)
+                }
+                self.accessibilityProblem = true
+                self.startAccessibilityTimer()
+                self.updateAppearance()
             }
         }
         eventTap.send = { [weak self] message in
@@ -137,21 +136,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func showStats() {
-        statsController.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    private func handleNetworkMessage(_ message: WireMessage, receivedAt: UInt64) {
+    private func handleNetworkMessage(_ message: WireMessage) {
         if (message == .release || message == .returnControl), role == .controller {
             DispatchQueue.main.async { [eventTap] in
                 eventTap.reclaimLocalControlFromRemote()
-                LatencyTracker.shared.recordReceiveToApply(absoluteTimeDiff(mach_absolute_time() - receivedAt))
             }
             return
         }
 
-        remoteInput.apply(message, receivedAt: receivedAt)
+        remoteInput.apply(message)
     }
 
     private func turnOn(role: AppRole) {

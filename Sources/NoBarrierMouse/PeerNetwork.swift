@@ -10,7 +10,7 @@ enum ConnectionState: Equatable {
 
 final class PeerNetwork {
     var onState: ((ConnectionState) -> Void)?
-    var onMessage: ((WireMessage, UInt64) -> Void)?
+    var onMessage: ((WireMessage) -> Void)?
 
     private let serviceType = "_nobarriermouse._tcp"
     private let queue = DispatchQueue(label: "NoBarrierMouse.Network", qos: .userInteractive)
@@ -47,7 +47,6 @@ final class PeerNetwork {
         connection = nil
         receiveBuffer.removeAll()
         state = .off
-        LatencyTracker.shared.stop()
     }
 
     func send(_ message: WireMessage) {
@@ -149,8 +148,6 @@ final class PeerNetwork {
         connection?.receive(minimumIncompleteLength: 3, maximumLength: 64 * 1024) { [weak self] data, _, complete, error in
             guard let self else { return }
 
-            let receivedAt = mach_absolute_time()
-
             if let data, !data.isEmpty {
                 receiveBuffer.append(data)
 
@@ -158,10 +155,9 @@ final class PeerNetwork {
                     if case .hello = message {
                         if state == .connecting {
                             state = .connected
-                            LatencyTracker.shared.start()
                         }
                     } else {
-                        dispatchMessage(message, receivedAt: receivedAt)
+                        dispatchMessage(message)
                     }
                 }
             }
@@ -170,7 +166,6 @@ final class PeerNetwork {
                 self.connection?.cancel()
                 self.connection = nil
                 self.state = self.listener == nil ? .off : .waiting
-                LatencyTracker.shared.stop()
                 return
             }
 
@@ -178,8 +173,8 @@ final class PeerNetwork {
         }
     }
 
-    private func dispatchMessage(_ message: WireMessage, receivedAt: UInt64) {
-        onMessage?(message, receivedAt)
+    private func dispatchMessage(_ message: WireMessage) {
+        onMessage?(message)
     }
 
     private func tryReadMessage() -> WireMessage? {
