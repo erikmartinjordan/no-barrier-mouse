@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.2.0](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.1.0...v0.2.0) (2026-06-12)
+
+
+### ✨ Features
+
+* add Input Quality Monitor panel with frosted glass design and monochromatic minimalistic layout ([2971bdf](https://github.com/erikmartinjordan/no-barrier-mouse/commit/2971bdf5c3a8f52c3b6dfe714c5dadafc0c9166a))
+
+
+### 🐛 Fixes
+
+* simplify TCP mouse movement path ([da04840](https://github.com/erikmartinjordan/no-barrier-mouse/commit/da0484069aa4088a1662b884c34924c75dd03bc1))
+* simplify UInt64 protocol decoding ([1b7f185](https://github.com/erikmartinjordan/no-barrier-mouse/commit/1b7f1854a721fb21c0e154616580a9409cbd2fa3))
+
+
+### ⚡ Performance
+
+* eliminate input queue hop for mouseDelta, remove redundant postMove, increase TCP minimum length ([c837318](https://github.com/erikmartinjordan/no-barrier-mouse/commit/c837318dd7f48ebf813a73a6edbba92fd42b640e))
+* reduce NWConnection receiver jitter and add latency instrumentation ([6eb00aa](https://github.com/erikmartinjordan/no-barrier-mouse/commit/6eb00aad18007e2bbcd91f502193bcf75627b4d5))
+
 ## [0.1.0](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.0.1...v0.1.0) (2026-06-11)
 
 
