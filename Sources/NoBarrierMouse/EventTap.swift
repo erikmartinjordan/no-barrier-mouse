@@ -30,6 +30,7 @@ final class EventTap {
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
     private var mode: ControlMode = .local
+    private var localCursorSuppressed = false
     private var currentEventStartedAt: UInt64?
     private var reclaimedAt: CFAbsoluteTime = 0
     private let reclaimAbsorbWindow: CFAbsoluteTime = 0.2
@@ -97,6 +98,7 @@ final class EventTap {
         }
         tap = nil
         runLoopSource = nil
+        tapRunLoop = nil
         isConnected = false
         clearPendingDelta()
         restoreLocalCursor()
@@ -226,13 +228,17 @@ final class EventTap {
     }
 
     private func suppressLocalCursor() {
+        guard !localCursorSuppressed else { return }
         CGDisplayHideCursor(CGMainDisplayID())
         CGAssociateMouseAndMouseCursorPosition(0)
+        localCursorSuppressed = true
     }
 
     private func restoreLocalCursor() {
+        guard localCursorSuppressed else { return }
         CGAssociateMouseAndMouseCursorPosition(1)
         CGDisplayShowCursor(CGMainDisplayID())
+        localCursorSuppressed = false
     }
 
     private func pinLocalCursor(at y: Double) {
