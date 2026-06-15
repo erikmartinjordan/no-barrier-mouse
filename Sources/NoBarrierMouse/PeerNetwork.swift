@@ -221,7 +221,7 @@ final class PeerNetwork {
         tcpOptions.maximumSegmentSize = 512
 
         let params = NWParameters(tls: nil, tcp: tcpOptions)
-        params.includePeerToPeer = true
+        params.includePeerToPeer = false
         params.serviceClass = .interactiveVoice
         return params
     }
@@ -230,6 +230,9 @@ final class PeerNetwork {
         let candidates = results.filter { result in
             guard case .service(let name, _, _, _) = result.endpoint else { return true }
             guard name != id else { return false }
+            if !result.interfaces.isEmpty, result.interfaces.allSatisfy(isDirectPeerInterface) {
+                return false
+            }
             return id.localizedStandardCompare(name) == .orderedAscending
         }
 
@@ -247,7 +250,7 @@ final class PeerNetwork {
             return 240
         }
         if interfaces.contains(where: isDirectPeerInterface) {
-            return 120
+            return 0
         }
         return 20
     }
