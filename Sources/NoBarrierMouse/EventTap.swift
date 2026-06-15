@@ -10,8 +10,13 @@ enum ThrottleRate: Double, CaseIterable {
     case hz250 = 0.004
 }
 
+private enum ControlMode {
+    case local
+    case remote
+    case reclaiming
+}
+
 final class EventTap {
-    var isForwarding = false
     var isConnected = false
     var send: ((WireMessage) -> Void)?
     var onForwardingChanged: ((Bool) -> Void)?
@@ -19,10 +24,15 @@ final class EventTap {
     var onCaptureFailed: (() -> Void)?
     var throttleRate: ThrottleRate = .hz1000
 
+    var isForwarding: Bool { mode == .remote }
+
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-    private var localCursorSuppressed = false
+    private var tapRunLoop: CFRunLoop?
+    private var mode: ControlMode = .local
     private var currentEventStartedAt: UInt64?
+    private var reclaimedAt: CFAbsoluteTime = 0
+    private let reclaimAbsorbWindow: CFAbsoluteTime = 0.2
 
     @discardableResult
     func start() -> Bool {
@@ -59,6 +69,7 @@ final class EventTap {
             onCaptureFailed?()
             return false
         }
+        tapRunLoop = CFRunLoopGetCurrent()
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
@@ -72,6 +83,12 @@ final class EventTap {
     }
 
     func stop() {
+        performOnTapRunLoop {
+            self.stopOnTapThread()
+        }
+    }
+
+    private func stopOnTapThread() {
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
         }
@@ -80,27 +97,51 @@ final class EventTap {
         }
         tap = nil
         runLoopSource = nil
-        isForwarding = false
         isConnected = false
         clearPendingDelta()
         restoreLocalCursor()
+        mode = .local
     }
 
     func releaseLocalControl() {
-        isForwarding = false
+        performOnTapRunLoop {
+            self.releaseOnTapThread()
+        }
+    }
+
+    private func releaseOnTapThread() {
         flushDelta()
         restoreLocalCursor()
+        mode = .local
         onForwardingChanged?(false)
     }
 
     func reclaimLocalControlFromRemote() {
-        isForwarding = false
+        performOnTapRunLoop {
+            self.reclaimOnTapThread()
+        }
+    }
+
+    private func reclaimOnTapThread() {
         clearPendingDelta()
-        restoreLocalCursor()
+        mode = .reclaiming
+        reclaimedAt = CFAbsoluteTimeGetCurrent()
 
         let screen = NSScreenFrame.main
-        CGWarpMouseCursorPosition(CGPoint(x: screen.maxX - 24, y: screen.midY))
+        CGWarpMouseCursorPosition(CGPoint(x: screen.maxX - 24, y: pinnedY))
+        restoreLocalCursor()
+
+        mode = .local
         onForwardingChanged?(false)
+    }
+
+    private func performOnTapRunLoop(_ block: @escaping () -> Void) {
+        if let tapRunLoop {
+            CFRunLoopPerformBlock(tapRunLoop, CFRunLoopMode.commonModes.rawValue, block)
+            CFRunLoopWakeUp(tapRunLoop)
+        } else {
+            block()
+        }
     }
 
     fileprivate func handle(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
@@ -116,7 +157,7 @@ final class EventTap {
 
         if isEmergencyRelease(type: type, event: event) {
             sendCaptured(.release)
-            releaseLocalControl()
+            releaseOnTapThread()
             onEmergencyOff?()
             return nil
         }
@@ -125,25 +166,41 @@ final class EventTap {
             return Unmanaged.passRetained(event)
         }
 
-        if !isForwarding, shouldEnterRemote(type: type, event: event) {
-            enterRemoteControl(at: event.location.y)
-            return nil
-        }
+        switch mode {
+        case .local:
+            if CFAbsoluteTimeGetCurrent() - reclaimedAt < reclaimAbsorbWindow {
+                let isMouseMovement = type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged
+                if isMouseMovement, event.location.x > NSScreenFrame.main.maxX - 20 {
+                    return nil
+                }
+            }
 
-        guard isForwarding else {
+            if shouldEnterRemote(type: type, event: event) {
+                enterRemoteControl(at: event.location.y)
+                return nil
+            }
+
+            return Unmanaged.passRetained(event)
+
+        case .remote:
+            if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 {
+                sendCaptured(.release)
+                releaseOnTapThread()
+                let screen = NSScreenFrame.main
+                CGWarpMouseCursorPosition(CGPoint(x: screen.midX, y: screen.midY))
+                return nil
+            }
+
+            forward(type: type, event: event)
+            return nil
+
+        case .reclaiming:
+            let isMouseMovement = type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged
+            if isMouseMovement {
+                return nil
+            }
             return Unmanaged.passRetained(event)
         }
-
-        if type == .keyDown, event.getIntegerValueField(.keyboardEventKeycode) == 53 {
-            sendCaptured(.release)
-            releaseLocalControl()
-            let screen = NSScreenFrame.main
-            CGWarpMouseCursorPosition(CGPoint(x: screen.midX, y: screen.midY))
-            return nil
-        }
-
-        forward(type: type, event: event)
-        return nil
     }
 
     private func crossesRightEdge(event: CGEvent, type: CGEventType) -> Bool {
@@ -154,29 +211,28 @@ final class EventTap {
     }
 
     private func shouldEnterRemote(type: CGEventType, event: CGEvent) -> Bool {
+        if CFAbsoluteTimeGetCurrent() - reclaimedAt < reclaimAbsorbWindow {
+            return false
+        }
         return crossesRightEdge(event: event, type: type) || isKeyboardEnterRemote(type: type, event: event)
     }
 
     private func enterRemoteControl(at y: Double) {
-        isForwarding = true
         suppressLocalCursor()
         sendCaptured(.enter(y: y))
         onForwardingChanged?(true)
+        mode = .remote
         pinLocalCursor(at: y)
     }
 
     private func suppressLocalCursor() {
-        guard !localCursorSuppressed else { return }
         CGDisplayHideCursor(CGMainDisplayID())
         CGAssociateMouseAndMouseCursorPosition(0)
-        localCursorSuppressed = true
     }
 
     private func restoreLocalCursor() {
-        guard localCursorSuppressed else { return }
         CGAssociateMouseAndMouseCursorPosition(1)
         CGDisplayShowCursor(CGMainDisplayID())
-        localCursorSuppressed = false
     }
 
     private func pinLocalCursor(at y: Double) {
@@ -191,7 +247,7 @@ final class EventTap {
     }
 
     private func pinLocalCursorIfNeeded() {
-        guard localCursorSuppressed else { return }
+        guard mode == .remote else { return }
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastCursorPinAt >= cursorPinInterval else { return }
         lastCursorPinAt = now
