@@ -19,7 +19,6 @@ enum WireMessage: Equatable {
     case benchmarkDelta(id: UInt32, sequence: UInt32, sentMilliseconds: Double, dx: Double, dy: Double)
     case benchmarkEnd(id: UInt32)
     case benchmarkRequestNWConnection
-    case benchmarkRequestRawSocket(host: String, port: UInt16)
 
     enum PeerRole: String {
         case controller
@@ -94,10 +93,6 @@ final class WireCodec {
             data.appendUInt32LE(id)
         case .benchmarkRequestNWConnection:
             data.appendByte(16)
-        case .benchmarkRequestRawSocket(let host, let port):
-            data.appendByte(17)
-            data.appendString(host)
-            data.appendUInt16LE(port)
         }
         return data
     }
@@ -170,10 +165,6 @@ final class WireCodec {
             return .benchmarkEnd(id: id)
         case 16:
             return .benchmarkRequestNWConnection
-        case 17:
-            guard let host = data.readString(at: &offset),
-                  let port = data.readUInt16LE(at: &offset) else { return nil }
-            return .benchmarkRequestRawSocket(host: host, port: port)
         default:
             return nil
         }

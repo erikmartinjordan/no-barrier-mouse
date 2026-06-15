@@ -75,7 +75,7 @@ final class RemoteInput {
         case .returnControl:
             leaveRemote()
             onReleaseRequested?()
-        case .hello, .ping, .pong, .benchmarkRequestNWConnection, .benchmarkRequestRawSocket:
+        case .hello, .ping, .pong, .benchmarkRequestNWConnection:
             break
         }
     }
