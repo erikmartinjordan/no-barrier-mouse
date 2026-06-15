@@ -6,18 +6,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let menu = NSMenu()
     private let statusLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let powerItem = NSMenuItem(title: "Enabled", action: #selector(togglePower), keyEquivalent: "")
-    private let chooseRoleItem = NSMenuItem(title: "Choose Role...", action: #selector(chooseRole), keyEquivalent: "")
-    private let monitorItem = NSMenuItem(title: "Input Monitor...", action: #selector(showInputMonitor), keyEquivalent: "m")
-    private let benchmarkItem = NSMenuItem(title: "Run Mouse Benchmark", action: #selector(runMouseBenchmark), keyEquivalent: "b")
-    private let rawSocketBenchmarkItem = NSMenuItem(title: "Run Socket Benchmark", action: #selector(runRawSocketBenchmark), keyEquivalent: "")
+    private let settingsItem = NSMenuItem(title: "Settings...", action: #selector(showSettings), keyEquivalent: ",")
     private let quitItem = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
     private let network = PeerNetwork()
     private let eventTap = EventTap()
     private let remoteInput = RemoteInput()
-    private let rawSocketBenchmarkServer = RawSocketMouseBenchmarkServer()
-    private let rawSocketBenchmarkClient = RawSocketMouseBenchmarkClient()
     private let roleSelectionController = RoleSelectionController()
-    private lazy var monitorController = InputMonitorWindowController()
+    private lazy var settingsController = SettingsWindowController()
 
     private var isOn = false
     private var role: AppRole?
@@ -41,18 +36,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startAutomationCommandPoller()
         updateAppearance()
 
+        if let previewRole = settingsPreviewRoleFromArguments() {
+            NSApp.setActivationPolicy(.regular)
+            InputMetrics.shared.setTransport("Router WiFi")
+            settingsController.present()
+            settingsController.update(state: SettingsPanelState(
+                role: previewRole,
+                isOn: true,
+                connectionState: .connected,
+                airDropLatencyModeEnabled: previewRole == .receiver,
+                airDropIsOff: previewRole == .receiver,
+                previewLatency: previewRole == .receiver ? previewLatencySnapshot() : nil
+            ))
+            return
+        }
+
         if let launchRole = launchRoleFromArguments() {
             turnOn(role: launchRole)
         } else {
-            roleSelectionController.show { [weak self] role in
-                self?.turnOn(role: role)
-            }
+            showRoleSelection()
         }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        roleSelectionController.show { [weak self] role in
-            self?.turnOn(role: role)
+        if isOn {
+            showSettings()
+        } else {
+            showRoleSelection()
         }
         return true
     }
@@ -75,6 +85,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func settingsPreviewRoleFromArguments() -> AppRole? {
+        let arguments = CommandLine.arguments.map { $0.lowercased() }
+        guard let index = arguments.firstIndex(of: "--settings-preview"), arguments.indices.contains(index + 1) else {
+            return nil
+        }
+        switch arguments[index + 1] {
+        case "controller":
+            return .controller
+        case "receiver":
+            return .receiver
+        default:
+            return nil
+        }
+    }
+
+    private func previewLatencySnapshot() -> EndToEndLatencySnapshot {
+        let values: [Double] = [
+            6.1, 6.5, 6.7, 6.9, 7.2, 7.5, 7.8, 8.0,
+            8.1, 8.4, 8.6, 9.0, 11.2, 8.7, 8.2, 7.9,
+            8.3, 8.8, 12.6, 9.1, 8.6, 8.0, 7.6, 7.8,
+            8.4, 22.0, 9.3, 8.6, 36.0, 8.7, 8.1, 8.4
+        ]
+        return EndToEndLatencySnapshot(
+            values: values,
+            count: values.count,
+            p50: 8.4,
+            p90: 11.2,
+            p99: 18.6,
+            last: 8.4,
+            updatedAt: Date()
+        )
+    }
+
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: 24)
 
@@ -87,19 +130,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusLabel.isEnabled = false
         powerItem.target = self
-        chooseRoleItem.target = self
-        monitorItem.target = self
-        benchmarkItem.target = self
-        rawSocketBenchmarkItem.target = self
+        settingsItem.target = self
         quitItem.target = self
         menu.addItem(statusLabel)
         menu.addItem(NSMenuItem.separator())
         menu.addItem(powerItem)
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(chooseRoleItem)
-        menu.addItem(monitorItem)
-        menu.addItem(benchmarkItem)
-        menu.addItem(rawSocketBenchmarkItem)
+        menu.addItem(settingsItem)
         menu.addItem(NSMenuItem.separator())
         let accItem = NSMenuItem(title: "Grant Accessibility...", action: #selector(grantAccessibility), keyEquivalent: "")
         accItem.target = self
@@ -156,12 +193,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.accessibilityProblem = true
             self?.updateAppearance()
         }
-        rawSocketBenchmarkServer.onMessage = { [weak self] message, receivedAt in
-            self?.remoteInput.apply(message, receivedAt: receivedAt)
+        settingsController.onRoleSelected = { [weak self] role in
+            self?.turnOn(role: role)
+        }
+        settingsController.onAirDropLatencyModeChanged = { [weak self] enabled in
+            self?.setAirDropLatencyMode(enabled)
+        }
+        settingsController.onRunBenchmark = { [weak self] in
+            guard self?.role == .receiver else { return }
+            self?.runMouseBenchmark()
         }
     }
 
     @objc private func chooseRole() {
+        showRoleSelection()
+    }
+
+    private func showRoleSelection() {
         roleSelectionController.show { [weak self] role in
             self?.turnOn(role: role)
         }
@@ -175,8 +223,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func showInputMonitor() {
-        monitorController.present()
+    @objc private func showSettings() {
+        settingsController.present()
+        updateSettingsPanel()
     }
 
     @objc private func runMouseBenchmark() {
@@ -230,20 +279,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         timer.resume()
     }
 
-    @objc private func runRawSocketBenchmark() {
-        guard state == .connected else {
-            writeAutomationStatus(reason: "raw-benchmark-skipped-not-connected")
-            return
-        }
-        guard role == .controller else {
-            sendRawSocketBenchmarkRequest()
-            writeAutomationStatus(reason: "raw-benchmark-requested-from-receiver")
-            return
-        }
-        writeAutomationStatus(reason: "raw-benchmark-started-on-controller")
-        rawSocketBenchmarkClient.run()
-    }
-
     private func handleNetworkMessage(_ message: WireMessage, receivedAt: UInt64) {
         if (message == .release || message == .returnControl), role == .controller {
             DispatchQueue.main.async { [eventTap] in
@@ -259,13 +294,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if case .benchmarkRequestRawSocket(let host, let port) = message, role == .controller {
-            DispatchQueue.main.async { [weak self] in
-                self?.rawSocketBenchmarkClient.run(host: host, port: port)
-            }
-            return
-        }
-
         remoteInput.apply(message, receivedAt: receivedAt)
     }
 
@@ -274,12 +302,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(runMouseBenchmark),
             name: Notification.Name("NoBarrierMouseRunBenchmark"),
-            object: nil
-        )
-        DistributedNotificationCenter.default().addObserver(
-            self,
-            selector: #selector(runRawSocketBenchmark),
-            name: Notification.Name("NoBarrierMouseRunSocketBenchmark"),
             object: nil
         )
         DistributedNotificationCenter.default().addObserver(
@@ -313,24 +335,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             writeAutomationStatus(reason: "file-command-status")
         case "nwBenchmark":
             runMouseBenchmark()
-        case "rawBenchmark":
-            runRawSocketBenchmark()
         default:
             writeAutomationStatus(reason: "unknown-file-command-\(command)")
-        }
-    }
-
-    private func sendRawSocketBenchmarkRequest() {
-        rawSocketBenchmarkServer.start()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
-            guard let self else { return }
-            guard let port = self.rawSocketBenchmarkServer.port else {
-                self.writeAutomationStatus(reason: "raw-benchmark-skipped-no-local-port")
-                return
-            }
-            let host = self.benchmarkHostName()
-            self.network.send(.benchmarkRequestRawSocket(host: host, port: port))
-            self.writeAutomationStatus(reason: "raw-benchmark-request-sent host=\(host) port=\(port)")
         }
     }
 
@@ -350,8 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "statusRole": status.role,
             "connected": status.connected,
             "transport": status.transport,
-            "issue": status.issue as Any,
-            "rawSocketPort": rawSocketBenchmarkServer.port as Any
+            "issue": status.issue as Any
         ]
 
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) else {
@@ -361,14 +366,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .appendingPathComponent("Desktop")
             .appendingPathComponent("no-barrier-mouse-status.json")
         try? data.write(to: url, options: .atomic)
-    }
-
-    private func benchmarkHostName() -> String {
-        let localHostName = Host.current().localizedName ?? Host.current().name ?? "localhost"
-        if localHostName.contains(".") {
-            return localHostName
-        }
-        return "\(localHostName).local"
     }
 
     private func turnOn(role: AppRole) {
@@ -390,9 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             startAccessibilityTimer()
         }
         network.start(role: role)
-        if role == .receiver {
-            rawSocketBenchmarkServer.start()
-        }
+        AirDropLatencyMode.apply(disabled: AirDropLatencyMode.isEnabled && role == .receiver)
         updateAppearance()
     }
 
@@ -400,8 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stopAccessibilityTimer()
         benchmarkTimer?.cancel()
         benchmarkTimer = nil
-        rawSocketBenchmarkClient.stop()
-        rawSocketBenchmarkServer.stop()
+        AirDropLatencyMode.apply(disabled: false)
         eventTap.stop()
         remoteInput.reset()
         network.stop()
@@ -410,6 +404,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         accessibilityProblem = false
         inputMonitoringProblem = false
         state = .off
+        updateSettingsPanel()
     }
 
     private func startAccessibilityTimer() {
@@ -488,12 +483,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             issue: issue
         )
         powerItem.state = isOn ? .on : .off
-        chooseRoleItem.title = isOn ? "Change Role..." : "Choose Role..."
         accessibilityItem?.isHidden = !accessibilityProblem
         inputMonitoringItem?.isHidden = !inputMonitoringProblem
-        benchmarkItem.isEnabled = state == .connected && role == .controller
-        rawSocketBenchmarkItem.isEnabled = state == .connected && role == .controller
+        updateSettingsPanel()
 
+    }
+
+    private func setAirDropLatencyMode(_ enabled: Bool) {
+        AirDropLatencyMode.isEnabled = enabled
+        AirDropLatencyMode.apply(disabled: enabled && role == .receiver)
+        updateSettingsPanel()
+    }
+
+    private func updateSettingsPanel() {
+        settingsController.update(state: SettingsPanelState(
+            role: role,
+            isOn: isOn,
+            connectionState: state,
+            airDropLatencyModeEnabled: AirDropLatencyMode.isEnabled,
+            airDropIsOff: AirDropLatencyMode.isAirDropOff
+        ))
     }
 
     @discardableResult

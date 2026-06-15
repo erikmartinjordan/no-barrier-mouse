@@ -48,7 +48,9 @@ final class MouseBenchmarkRecorder {
         let receivedGaps = gaps(samples.map(\.receivedMilliseconds))
         let appliedGaps = gaps(samples.map(\.appliedMilliseconds))
         let sentGaps = gaps(samples.map(\.sentMilliseconds))
+        let endToEndValues = samples.map { max(0, $0.appliedMilliseconds - $0.receivedMilliseconds) }
         let missing = max(0, Int(expectedSamples) - samples.count)
+        InputMetrics.shared.setEndToEndLatency(values: endToEndValues)
 
         let payload: [String: Any] = [
             "id": id,
@@ -69,7 +71,9 @@ final class MouseBenchmarkRecorder {
                 "appliedGapP50Ms": percentile(appliedGaps, 0.50),
                 "appliedGapP95Ms": percentile(appliedGaps, 0.95),
                 "appliedGapMaxMs": appliedGaps.max() ?? 0,
-                "endToEndP95Ms": percentile(samples.map { max(0, $0.appliedMilliseconds - $0.receivedMilliseconds) }, 0.95)
+                "endToEndP50Ms": percentile(endToEndValues, 0.50),
+                "endToEndP90Ms": percentile(endToEndValues, 0.90),
+                "endToEndP99Ms": percentile(endToEndValues, 0.99)
             ],
             "samples": samples.map { sample in
                 [

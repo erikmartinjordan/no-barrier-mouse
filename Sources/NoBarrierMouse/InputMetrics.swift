@@ -194,6 +194,22 @@ struct InputMonitorStatusSnapshot {
     let issue: String?
 }
 
+struct EndToEndLatencySnapshot {
+    let values: [Double]
+    let count: Int
+    let p50: Double
+    let p90: Double
+    let p99: Double
+    let last: Double
+    let updatedAt: Date?
+
+    var hasSamples: Bool {
+        count > 0
+    }
+
+    static let empty = EndToEndLatencySnapshot(values: [], count: 0, p50: 0, p90: 0, p99: 0, last: 0, updatedAt: nil)
+}
+
 final class InputMetrics {
     static let shared = InputMetrics()
 
@@ -206,6 +222,7 @@ final class InputMetrics {
     private let maxSamples = 720
     private var samples: [InputMetricID: [Sample]] = [:]
     private var status = InputMonitorStatusSnapshot(state: "Off", role: "No role", connected: false, transport: "No transport", issue: nil)
+    private var endToEndLatency = EndToEndLatencySnapshot.empty
 
     private init() {}
 
@@ -260,12 +277,42 @@ final class InputMetrics {
     func reset() {
         lock.lock()
         samples.removeAll()
+        endToEndLatency = .empty
+        lock.unlock()
+    }
+
+    func setEndToEndLatency(values: [Double]) {
+        let bounded = values.filter { $0.isFinite && $0 >= 0 }.map { min($0, 60_000) }
+        let sorted = bounded.sorted()
+        let total = bounded.count
+
+        lock.lock()
+        if bounded.isEmpty {
+            endToEndLatency = .empty
+        } else {
+            endToEndLatency = EndToEndLatencySnapshot(
+                values: Array(bounded.suffix(maxSamples)),
+                count: total,
+                p50: percentile(sorted, 0.50),
+                p90: percentile(sorted, 0.90),
+                p99: percentile(sorted, 0.99),
+                last: bounded.last ?? 0,
+                updatedAt: Date()
+            )
+        }
         lock.unlock()
     }
 
     func statusSnapshot() -> InputMonitorStatusSnapshot {
         lock.lock()
         let snapshot = status
+        lock.unlock()
+        return snapshot
+    }
+
+    func endToEndLatencySnapshot() -> EndToEndLatencySnapshot {
+        lock.lock()
+        let snapshot = endToEndLatency
         lock.unlock()
         return snapshot
     }
