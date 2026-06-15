@@ -7,6 +7,11 @@ final class RoleSelectionController: NSObject, NSWindowDelegate {
 
     func show(onSelect: @escaping (AppRole) -> Void) {
         self.onSelect = onSelect
+        if let window = _window {
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 480, height: 300),
@@ -90,11 +95,13 @@ final class RoleSelectionController: NSObject, NSWindowDelegate {
     private func select(_ role: AppRole) {
         _window?.delegate = nil
         _window?.close()
+        _window = nil
         onSelect?(role)
         onSelect = nil
     }
 
     func windowWillClose(_ notification: Notification) {
+        _window = nil
         onSelect = nil
     }
 
