@@ -43,6 +43,32 @@ The app bundles are created in:
 .build/release/intel/NoBarrierMouse.app
 ```
 
+### Stable Development Signing
+
+Do not use ad-hoc signing for repeated permission-sensitive testing. Ad-hoc
+signatures are tied to the binary hash, so every rebuild can look like a
+different app to macOS TCC and Accessibility/Input Monitoring may be requested
+again.
+
+Create a stable local signing identity once:
+
+```sh
+scripts/create-local-codesign-identity.sh
+scripts/create-local-codesign-identity.sh --trust
+make
+make intel
+```
+
+The `--trust` step asks for Touch ID or your macOS password once so the local
+certificate can be trusted for code signing.
+
+After that, grant app permissions once to the rebuilt app. Future native/Intel
+builds keep the same signing identity and bundle identifier, so macOS should
+keep the permission grant across rebuilds.
+
+For a production or distribution build, set `CODESIGN_IDENTITY` to an Apple
+Development or Developer ID identity instead.
+
 ## Use
 
 1. Open No Barrier Mouse on both Macs.
@@ -56,6 +82,29 @@ The app bundles are created in:
 If the cursor moves but clicks or scrolling do not work, remove the old No Barrier Mouse entry from Privacy & Security, add the current app again, then reopen it.
 
 If mouse and clicks work but the keyboard does not, grant Input Monitoring permission on the controller Mac, then quit and reopen No Barrier Mouse.
+
+## Unattended E2E Test Mode
+
+`--test-mode` runs a safe two-machine transition test with JSON diagnostics and automatic recovery. The iMac runs as `Controller`; the MacBook runs as `Receiver`.
+
+One-time setup:
+
+1. Grant Accessibility on both Macs.
+2. Grant Input Monitoring on the iMac controller.
+3. Enable Remote Login on the iMac so the MacBook can launch it over SSH.
+4. Keep both Macs logged into their desktop sessions.
+
+Build both bundles, then run the real video E2E from the MacBook:
+
+```sh
+make
+make intel
+scripts/run-e2e-imac-controller-video.sh erik@iMac-de-Erik.local 50
+```
+
+The script installs the native receiver locally, installs the Intel controller on the iMac, keeps both displays awake, captures both real screens, runs 50 crossings, validates `Cmd-V` and `Cmd-C`, and writes a side-by-side video plus JSON logs under `/tmp/no-barrier-e2e-real-*`.
+
+The emergency hotkey is `Control-Option-Command-Escape`. In test mode, the watchdog saves diagnostics and recovers automatically if forwarding stalls or the controller cursor appears trapped at the right edge.
 
 ## Release Strategy
 
@@ -76,4 +125,4 @@ Each release contains only:
 
 ## Notes
 
-The app is unsigned and not notarized by default. macOS may require right-clicking the app and choosing `Open` the first time.
+The app is not notarized by default. macOS may require right-clicking the app and choosing `Open` the first time.
