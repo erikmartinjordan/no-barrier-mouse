@@ -6,6 +6,7 @@ import Foundation
 final class RemoteInput {
     var onReleaseRequested: (() -> Void)?
     var onInputPostingBlocked: (() -> Void)?
+    var suppressPermissionSideEffects = false
 
     private lazy var eventSource = CGEventSource(stateID: .hidSystemState)
     private let doubleClickInterval = NSEvent.doubleClickInterval
@@ -20,6 +21,13 @@ final class RemoteInput {
     private var benchmarkRecorder: MouseBenchmarkRecorder?
     private var cachedTrust = AXIsProcessTrusted()
     private var nextTrustCheck = CFAbsoluteTime(0)
+    private var keyEventsReceived = 0
+    private var keyEventsPosted = 0
+    private var lastKeyCode: UInt16?
+    private var lastKeyDown = false
+    private var lastKeyFlags: UInt64 = 0
+    private var lastKeyWasRemoteActive = false
+    private var lastKeyWasTrusted = false
 
     private var mainScreen: CGRect {
         CGDisplayBounds(CGMainDisplayID())
@@ -55,17 +63,22 @@ final class RemoteInput {
             let event = CGEvent(scrollWheelEvent2Source: eventSource, units: .line, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)
             post(event, startedAt: postStartedAt)
         case .key(let code, let down, let flags):
+            recordKeyEvent(code: code, down: down, flags: flags)
             guard isRemoteActive, canPostInputEvents() else { return }
             let postStartedAt = InputMetrics.nowTicks()
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: down)
             event?.flags = CGEventFlags(wireValue: flags)
             post(event, startedAt: postStartedAt)
+            keyEventsPosted += 1
         case .flags(let code, let flags):
+            recordKeyEvent(code: code, down: flags != 0, flags: flags)
             guard isRemoteActive, canPostInputEvents() else { return }
             let postStartedAt = InputMetrics.nowTicks()
-            let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: true)
+            let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: flags != 0)
             event?.flags = CGEventFlags(wireValue: flags)
+            event?.type = .flagsChanged
             post(event, startedAt: postStartedAt)
+            keyEventsPosted += 1
         case .activate:
             enterFromLeftEdge(at: mainScreen.midY)
         case .enter(let y):
@@ -75,7 +88,13 @@ final class RemoteInput {
         case .returnControl:
             leaveRemote()
             onReleaseRequested?()
-        case .hello, .ping, .pong, .benchmarkRequestNWConnection:
+        case .hello,
+             .ping,
+             .pong,
+             .benchmarkRequestNWConnection,
+             .testClipboardPayload,
+             .testClipboardPrepareCopy,
+             .testClipboardResult:
             break
         }
     }
@@ -88,6 +107,36 @@ final class RemoteInput {
         lastMouseApplyAt = nil
         _ = benchmarkRecorder?.finish(reason: "reset")
         benchmarkRecorder = nil
+    }
+
+    func diagnosticsSnapshot() -> [String: Any] {
+        [
+            "isRemoteActive": isRemoteActive,
+            "cursorX": cursorPoint.x,
+            "cursorY": cursorPoint.y,
+            "pressedButton": pressedButton ?? NSNull(),
+            "didRequestRelease": didRequestRelease,
+            "lastMouseArrivalAt": lastMouseArrivalAt.map(String.init) ?? NSNull(),
+            "lastMouseApplyAt": lastMouseApplyAt.map(String.init) ?? NSNull(),
+            "accessibilityTrusted": AXIsProcessTrusted(),
+            "suppressPermissionSideEffects": suppressPermissionSideEffects,
+            "keyEventsReceived": keyEventsReceived,
+            "keyEventsPosted": keyEventsPosted,
+            "lastKeyCode": lastKeyCode.map { Int($0) } ?? NSNull(),
+            "lastKeyDown": lastKeyDown,
+            "lastKeyFlags": String(lastKeyFlags),
+            "lastKeyWasRemoteActive": lastKeyWasRemoteActive,
+            "lastKeyWasTrusted": lastKeyWasTrusted
+        ]
+    }
+
+    private func recordKeyEvent(code: UInt16, down: Bool, flags: UInt64) {
+        keyEventsReceived += 1
+        lastKeyCode = code
+        lastKeyDown = down
+        lastKeyFlags = flags
+        lastKeyWasRemoteActive = isRemoteActive
+        lastKeyWasTrusted = canPostInputEvents()
     }
 
     private func recordMouseArrival(_ receivedAt: UInt64) {
@@ -113,7 +162,9 @@ final class RemoteInput {
         if cachedTrust {
             return true
         }
-        onInputPostingBlocked?()
+        if !suppressPermissionSideEffects {
+            onInputPostingBlocked?()
+        }
         return false
     }
 
@@ -147,7 +198,7 @@ final class RemoteInput {
     }
 
     private func postMove(at point: CGPoint, startedAt: UInt64) {
-        guard canPostInputEvents() else { return }
+        guard isRemoteActive else { return }
 
         let type: CGEventType
         let button: CGMouseButton
@@ -255,7 +306,30 @@ final class RemoteInput {
 
     private func post(_ event: CGEvent?, startedAt: UInt64) {
         guard let event else { return }
-        event.post(tap: .cghidEventTap)
+        if isCursorEvent(event.type) {
+            CGWarpMouseCursorPosition(event.location)
+        }
+        if !suppressPermissionSideEffects || AXIsProcessTrusted() {
+            event.post(tap: .cghidEventTap)
+        }
         InputMetrics.shared.record(.cgEventPost, from: startedAt)
+    }
+
+    private func isCursorEvent(_ type: CGEventType) -> Bool {
+        switch type {
+        case .mouseMoved,
+             .leftMouseDragged,
+             .rightMouseDragged,
+             .otherMouseDragged,
+             .leftMouseDown,
+             .leftMouseUp,
+             .rightMouseDown,
+             .rightMouseUp,
+             .otherMouseDown,
+             .otherMouseUp:
+            return true
+        default:
+            return false
+        }
     }
 }
