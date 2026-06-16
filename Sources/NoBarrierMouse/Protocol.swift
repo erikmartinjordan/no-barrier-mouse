@@ -19,6 +19,9 @@ enum WireMessage: Equatable {
     case benchmarkDelta(id: UInt32, sequence: UInt32, sentMilliseconds: Double, dx: Double, dy: Double)
     case benchmarkEnd(id: UInt32)
     case benchmarkRequestNWConnection
+    case testClipboardPayload(cycle: UInt16, text: String)
+    case testClipboardPrepareCopy(cycle: UInt16)
+    case testClipboardResult(cycle: UInt16, pasteSucceeded: Bool, copySucceeded: Bool, observedLength: UInt16)
 
     enum PeerRole: String {
         case controller
@@ -93,6 +96,19 @@ final class WireCodec {
             data.appendUInt32LE(id)
         case .benchmarkRequestNWConnection:
             data.appendByte(16)
+        case .testClipboardPayload(let cycle, let text):
+            data.appendByte(17)
+            data.appendUInt16LE(cycle)
+            data.appendString(text)
+        case .testClipboardPrepareCopy(let cycle):
+            data.appendByte(18)
+            data.appendUInt16LE(cycle)
+        case .testClipboardResult(let cycle, let pasteSucceeded, let copySucceeded, let observedLength):
+            data.appendByte(19)
+            data.appendUInt16LE(cycle)
+            data.appendByte(pasteSucceeded ? 1 : 0)
+            data.appendByte(copySucceeded ? 1 : 0)
+            data.appendUInt16LE(observedLength)
         }
         return data
     }
@@ -165,6 +181,24 @@ final class WireCodec {
             return .benchmarkEnd(id: id)
         case 16:
             return .benchmarkRequestNWConnection
+        case 17:
+            guard let cycle = data.readUInt16LE(at: &offset),
+                  let text = data.readString(at: &offset) else { return nil }
+            return .testClipboardPayload(cycle: cycle, text: text)
+        case 18:
+            guard let cycle = data.readUInt16LE(at: &offset) else { return nil }
+            return .testClipboardPrepareCopy(cycle: cycle)
+        case 19:
+            guard let cycle = data.readUInt16LE(at: &offset),
+                  let pasteRaw = data.readByte(at: &offset),
+                  let copyRaw = data.readByte(at: &offset),
+                  let observedLength = data.readUInt16LE(at: &offset) else { return nil }
+            return .testClipboardResult(
+                cycle: cycle,
+                pasteSucceeded: pasteRaw != 0,
+                copySucceeded: copyRaw != 0,
+                observedLength: observedLength
+            )
         default:
             return nil
         }
