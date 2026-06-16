@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let remoteInput = RemoteInput()
     private let roleSelectionController = RoleSelectionController()
     private lazy var settingsController = SettingsWindowController()
+    private let savedRoleStore = SavedRoleStore()
 
     private var isOn = false
     private var role: AppRole?
@@ -25,6 +26,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var benchmarkTimer: DispatchSourceTimer?
     private var automationTimer: Timer?
     private var lastAutomationCommandID: String?
+    private lazy var e2eTest = E2ETestRunner(
+        eventTap: eventTap,
+        remoteInput: remoteInput,
+        send: { [weak self] message in self?.network.send(message) },
+        role: { [weak self] in self?.role },
+        state: { [weak self] in self?.state ?? .off },
+        isOn: { [weak self] in self?.isOn ?? false },
+        accessibilityProblem: { [weak self] in self?.accessibilityProblem ?? false },
+        inputMonitoringProblem: { [weak self] in self?.inputMonitoringProblem ?? false },
+        turnOff: { [weak self] in self?.turnOff(keepTestModeRunning: false) }
+    )
     private let disconnectedIcon = MouseIcon.make()
     private let connectedIcon = MouseIcon.makeConnected()
 
@@ -34,6 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         wireComponents()
         registerBenchmarkAutomation()
         startAutomationCommandPoller()
+        e2eTest.startIfNeeded()
         updateAppearance()
 
         if let previewRole = settingsPreviewRoleFromArguments() {
@@ -53,6 +66,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let launchRole = launchRoleFromArguments() {
             turnOn(role: launchRole)
+        } else if let savedRole = savedRoleStore.load() {
+            turnOn(role: AppRole(savedRole: savedRole))
         } else {
             showRoleSelection()
         }
@@ -153,10 +168,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func wireComponents() {
         network.onState = { [weak self] state in
-            self?.state = state
-            self?.eventTap.isConnected = state == .connected
+            guard let self else { return }
+            self.state = state
+            self.eventTap.isConnected = state == .connected
+            if state == .connected, self.role == .controller {
+                self.ensureControllerEventTapStarted()
+                self.e2eTest.startTortureIfNeeded(trigger: "connected")
+            }
             if state != .connected, state != .connecting {
-                self?.eventTap.releaseLocalControl()
+                self.eventTap.releaseLocalControl()
             }
         }
         network.onMessage = { [weak self] message, receivedAt in
@@ -187,7 +207,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         eventTap.onEmergencyOff = { [weak self] in
-            self?.turnOff()
+            self?.e2eTest.recoverFromTrap(reason: "emergency-hotkey", turnOffAfterRecovery: true)
+        }
+        eventTap.onDiagnosticsEvent = { [weak self] name, payload in
+            self?.e2eTest.writeDiagnostics(reason: "eventtap-\(name)", extra: payload)
         }
         eventTap.onCaptureFailed = { [weak self] in
             self?.accessibilityProblem = true
@@ -280,6 +303,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleNetworkMessage(_ message: WireMessage, receivedAt: UInt64) {
+        if e2eTest.handleClipboardMessage(message) {
+            return
+        }
+
         if (message == .release || message == .returnControl), role == .controller {
             DispatchQueue.main.async { [eventTap] in
                 eventTap.reclaimLocalControlFromRemote()
@@ -335,6 +362,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             writeAutomationStatus(reason: "file-command-status")
         case "nwBenchmark":
             runMouseBenchmark()
+        case "e2eTorture":
+            e2eTest.startTortureIfNeeded(trigger: "file-command")
+        case "recover":
+            e2eTest.recoverFromTrap(reason: "file-command", turnOffAfterRecovery: false)
         default:
             writeAutomationStatus(reason: "unknown-file-command-\(command)")
         }
@@ -369,9 +400,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func turnOn(role: AppRole) {
-        turnOff()
+        turnOff(keepTestModeRunning: true)
         self.role = role
         isOn = true
+        savedRoleStore.save(role.savedRole)
         InputMetrics.shared.reset()
         accessibilityProblem = !requestAccessibilityIfNeeded(prompt: true)
         if role == .controller {
@@ -389,9 +421,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         network.start(role: role)
         AirDropLatencyMode.apply(disabled: AirDropLatencyMode.isEnabled && role == .receiver)
         updateAppearance()
+        e2eTest.startTortureIfNeeded(trigger: "turnOn")
+    }
+
+    private func ensureControllerEventTapStarted() {
+        guard role == .controller else { return }
+        if !eventTap.start() {
+            accessibilityProblem = true
+            startAccessibilityTimer()
+            updateAppearance()
+        }
     }
 
     @objc private func turnOff() {
+        turnOff(keepTestModeRunning: false)
+    }
+
+    private func turnOff(keepTestModeRunning: Bool) {
+        if !keepTestModeRunning {
+            e2eTest.stop()
+        }
         stopAccessibilityTimer()
         benchmarkTimer?.cancel()
         benchmarkTimer = nil
@@ -418,7 +467,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.inputMonitoringProblem = false
             }
             if self.role == .controller {
-                self.eventTap.start()
+                self.ensureControllerEventTapStarted()
             }
             self.updateAppearance()
             if !self.accessibilityProblem && !self.inputMonitoringProblem {
@@ -446,6 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quit() {
+        e2eTest.stop()
         eventTap.stop()
         network.stop()
         NSApp.terminate(nil)
