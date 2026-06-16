@@ -5,6 +5,12 @@ ARCH="${1:-native}"
 VERSION="${VERSION:-0.0.1}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 ICON_SRC="assets/NoBarrierMouse.icns"
+DEFAULT_CODESIGN_ENV="$HOME/Library/Application Support/NoBarrierMouse/codesign-env.sh"
+
+if [ -f "$DEFAULT_CODESIGN_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$DEFAULT_CODESIGN_ENV"
+fi
 
 if [ ! -f "$ICON_SRC" ]; then
   echo "Missing $ICON_SRC" >&2
@@ -75,8 +81,42 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
-if command -v codesign >/dev/null 2>&1; then
+if [ "${NO_CODESIGN:-0}" = "1" ]; then
+  echo "Skipping codesign because NO_CODESIGN=1" >&2
+elif command -v codesign >/dev/null 2>&1; then
+  if [ -n "${CODESIGN_KEYCHAIN:-}" ] && [ -f "${CODESIGN_KEYCHAIN_PASSWORD_FILE:-}" ]; then
+    security unlock-keychain -p "$(cat "$CODESIGN_KEYCHAIN_PASSWORD_FILE")" "$CODESIGN_KEYCHAIN" >/dev/null 2>&1 || true
+  fi
+
+  if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    SIGN_LOG="$(mktemp "${TMPDIR:-/tmp}/nobarrier-codesign.XXXXXX")"
+    if [ -n "${CODESIGN_KEYCHAIN:-}" ]; then
+      if codesign --force --deep --timestamp=none --keychain "$CODESIGN_KEYCHAIN" --sign "$CODESIGN_IDENTITY" "$APP" 2>"$SIGN_LOG"; then
+        echo "Signed with stable identity: $CODESIGN_IDENTITY" >&2
+        rm -f "$SIGN_LOG"
+        echo "$APP"
+        exit 0
+      fi
+    else
+      if codesign --force --deep --timestamp=none --sign "$CODESIGN_IDENTITY" "$APP" 2>"$SIGN_LOG"; then
+        echo "Signed with stable identity: $CODESIGN_IDENTITY" >&2
+        rm -f "$SIGN_LOG"
+        echo "$APP"
+        exit 0
+      fi
+    fi
+    echo "WARNING: stable codesign failed for identity: $CODESIGN_IDENTITY" >&2
+    cat "$SIGN_LOG" >&2
+    rm -f "$SIGN_LOG"
+  fi
+
   codesign --force --deep --sign - "$APP"
+  echo "WARNING: signed ad-hoc. macOS may ask for Accessibility/Input Monitoring again after each rebuild." >&2
+  if [ -f "$DEFAULT_CODESIGN_ENV" ]; then
+    echo "Run scripts/create-local-codesign-identity.sh --trust and approve the macOS prompt once." >&2
+  else
+    echo "Run scripts/create-local-codesign-identity.sh once to create a stable local signing identity." >&2
+  fi
 fi
 
 echo "$APP"
