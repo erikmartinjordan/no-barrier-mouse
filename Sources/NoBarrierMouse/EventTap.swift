@@ -101,6 +101,7 @@ final class EventTap {
     private var remoteSessionID: UInt64 = 0
     private var activeModifierKeyCodes = Set<UInt16>()
     private var activeMouseButtons = Set<Int>()
+    private var lastLocalMouseX: CGFloat?
     private let edgePolicy = EventTapEdgePolicy()
     private let debugLogging = ProcessInfo.processInfo.environment["NO_BARRIER_MOUSE_EVENTTAP_DEBUG"] == "1"
 
@@ -236,11 +237,13 @@ final class EventTap {
 
         switch mode {
         case .local:
+            let entryDelta = remoteEntryDelta(type: type, event: event)
             if shouldEnterRemote(type: type, event: event) {
-                enterRemoteControl(at: event.location.y)
-                log("consume event for remote entry type=\(type.rawValue) x=\(event.location.x)")
+                enterRemoteControl(at: event.location.y, initialDx: entryDelta)
+                log("consume event for remote entry type=\(type.rawValue) x=\(event.location.x) initialDx=\(entryDelta ?? 0)")
                 return nil
             }
+            rememberLocalMousePosition(type: type, event: event)
 
             return Unmanaged.passRetained(event)
 
@@ -276,39 +279,39 @@ final class EventTap {
         let now = CFAbsoluteTimeGetCurrent()
         let cooldownAge = now - reclaimedAt
         let threshold = edgePolicy.entryThreshold(maxX: NSScreenFrame.main.maxX)
-        if cooldownAge < edgePolicy.reclaimAbsorbWindow {
-            if isMouseMovement(type) {
-                let dx = event.getDoubleValueField(.mouseEventDeltaX)
-                log("shouldEnterRemote=false cooldown passLocal=true age=\(cooldownAge) window=\(edgePolicy.reclaimAbsorbWindow) x=\(event.location.x) dx=\(dx) threshold=\(threshold)")
-            }
+        let isMovement = isMouseMovement(type)
+        let keyboard = isKeyboardEnterRemote(type: type, event: event)
+        let effectiveDx = entryDirectionDelta(type: type, event: event)
+        if isMovement && cooldownAge < edgePolicy.reclaimAbsorbWindow {
+            log("shouldEnterRemote=false cooldown passLocal=true age=\(cooldownAge) window=\(edgePolicy.reclaimAbsorbWindow) x=\(event.location.x) dx=\(effectiveDx) threshold=\(threshold)")
             return false
         }
 
-        let isMovement = isMouseMovement(type)
-        let keyboard = isKeyboardEnterRemote(type: type, event: event)
         let shouldEnter = edgePolicy.shouldEnterRemote(
             now: now,
             reclaimedAt: reclaimedAt,
             x: event.location.x,
-            dx: isMovement ? event.getDoubleValueField(.mouseEventDeltaX) : 0,
+            dx: effectiveDx,
             isMouseMovement: isMovement,
             keyboardShortcut: keyboard,
             maxX: NSScreenFrame.main.maxX
         )
         if shouldEnter {
-            let dx = isMouseMovement(type) ? event.getDoubleValueField(.mouseEventDeltaX) : 0
-            log("shouldEnterRemote=true edge=\(crossesRightEdge(event: event, type: type)) keyboard=\(keyboard) x=\(event.location.x) dx=\(dx) threshold=\(threshold) cooldownAge=\(cooldownAge)")
+            log("shouldEnterRemote=true edge=\(crossesRightEdge(event: event, type: type)) keyboard=\(keyboard) x=\(event.location.x) dx=\(effectiveDx) threshold=\(threshold) cooldownAge=\(cooldownAge)")
         }
         return shouldEnter
     }
 
-    private func enterRemoteControl(at y: Double) {
+    private func enterRemoteControl(at y: Double, initialDx: Double? = nil) {
         remoteSessionID &+= 1
         activeModifierKeyCodes.removeAll()
         activeMouseButtons.removeAll()
         setMode(.remote, reason: "enter remote session=\(remoteSessionID)")
         suppressLocalCursor()
         sendCaptured(.enter(y: y))
+        if let initialDx, initialDx > 0 {
+            sendCaptured(.mouseDelta(dx: initialDx, dy: 0, button: nil))
+        }
         onForwardingChanged?(true)
         pinLocalCursor(at: y)
     }
@@ -419,6 +422,28 @@ final class EventTap {
         type == .mouseMoved || type == .leftMouseDragged || type == .rightMouseDragged || type == .otherMouseDragged
     }
 
+    private func entryDirectionDelta(type: CGEventType, event: CGEvent) -> Double {
+        guard isMouseMovement(type) else { return 0 }
+        let rawDx = event.getDoubleValueField(.mouseEventDeltaX)
+        if rawDx != 0 {
+            return rawDx
+        }
+        guard let lastLocalMouseX else { return 0 }
+        return Double(event.location.x - lastLocalMouseX)
+    }
+
+    private func remoteEntryDelta(type: CGEventType, event: CGEvent) -> Double? {
+        guard isMouseMovement(type) else { return nil }
+        let threshold = edgePolicy.entryThreshold(maxX: NSScreenFrame.main.maxX)
+        let overshoot = max(0, Double(event.location.x - threshold))
+        return max(overshoot, entryDirectionDelta(type: type, event: event))
+    }
+
+    private func rememberLocalMousePosition(type: CGEventType, event: CGEvent) {
+        guard isMouseMovement(type) else { return }
+        lastLocalMouseX = event.location.x
+    }
+
     private func setMode(_ newMode: ControlMode, reason: String) {
         guard mode != newMode else {
             return
@@ -465,6 +490,7 @@ final class EventTap {
             "reclaimedAgeSeconds": now - reclaimedAt,
             "activeModifierKeyCodes": activeModifierKeyCodes.sorted(),
             "activeMouseButtons": activeMouseButtons.sorted(),
+            "lastLocalMouseX": lastLocalMouseX ?? NSNull(),
             "modeAgeSeconds": now - modeChangedAt,
             "lastRecoveryReason": lastRecoveryReason ?? NSNull()
         ]
@@ -491,6 +517,7 @@ final class EventTap {
         pendingDeltaStartedAt = nil
         lastDeltaSend = now
         lastCursorPinAt = 0
+        lastLocalMouseX = nil
         activeModifierKeyCodes.removeAll()
         activeMouseButtons.removeAll()
         reclaimedAt = now
