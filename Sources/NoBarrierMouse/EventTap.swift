@@ -9,10 +9,10 @@ enum EventTapLocalDecision: Equatable {
 }
 
 struct EventTapEdgePolicy {
-    let reclaimAbsorbWindow: CFAbsoluteTime = 0.4
+    let reclaimAbsorbWindow: CFAbsoluteTime = 0.10
     let remoteEntryInset: CGFloat = 12
-    let remotePinInset: CGFloat = 32
-    let reclaimWarpInset: CGFloat = 180
+    let remotePinInset: CGFloat = 2
+    let reclaimWarpInset: CGFloat = 1
 
     func entryThreshold(maxX: CGFloat) -> CGFloat {
         maxX - remoteEntryInset
@@ -207,20 +207,34 @@ final class EventTap {
     }
 
     private func reclaimOnTapThread(y: Double?, carryDx: Double, carryDy: Double, handoffID: UInt64?) {
-        flushDelta()
+        // Do not flush these deltas back to the receiver during return handoff.
+        // At this point the receiver has already crossed the seam, so pending physical
+        // mouse movement belongs on the controller side.
+        let pendingCarryX = pendingDelta.x
+        let pendingCarryY = pendingDelta.y
+        clearPendingDelta()
+
         setMode(.reclaimingLocal, reason: "reclaim start")
         activeHandoffID = handoffID
         reclaimedAt = CFAbsoluteTimeGetCurrent()
 
         let screen = NSScreenFrame.main
         let restoreY = y ?? pinnedY
-        restoreLocalCursor()
-        let safeStart = CGPoint(x: edgePolicy.reclaimWarpX(maxX: screen.maxX), y: restoreY)
-        let final = clampLocalPoint(CGPoint(x: safeStart.x + CGFloat(carryDx), y: safeStart.y + CGFloat(carryDy)))
-        log("returnControl received handoffID=\(String(describing: handoffID)) y=\(restoreY) carry=(\(carryDx),\(carryDy)) final=(\(final.x),\(final.y))")
-        warpLocalCursor(to: final, reason: "reclaim carry")
 
-        setMode(.localCooldown, reason: "reclaim complete enter cooldown")
+        restoreLocalCursor()
+
+        // Normal return should anchor at the iMac right seam, not 180 px inside.
+        // Re-entry prevention is handled by localCooldown/shouldEnterRemote, not geometry.
+        let seamStart = CGPoint(x: edgePolicy.reclaimWarpX(maxX: screen.maxX), y: restoreY)
+        let final = clampLocalPoint(CGPoint(
+            x: seamStart.x + CGFloat(carryDx) + pendingCarryX,
+            y: seamStart.y + CGFloat(carryDy) + pendingCarryY
+        ))
+
+        log("returnControl received handoffID=\(String(describing: handoffID)) y=\(restoreY) carry=(\(carryDx),\(carryDy)) pendingCarry=(\(pendingCarryX),\(pendingCarryY)) final=(\(final.x),\(final.y))")
+        warpLocalCursor(to: final, reason: "reclaim seam carry")
+
+        setMode(.localCooldown, reason: "reclaim complete enter seam guard")
         onForwardingChanged?(false)
         scheduleCooldownExit()
     }
@@ -307,6 +321,20 @@ final class EventTap {
 
         let isMovement = isMouseMovement(type)
         let keyboard = isKeyboardEnterRemote(type: type, event: event)
+
+        if isMovement {
+            let dx = event.getDoubleValueField(.mouseEventDeltaX)
+
+            // Being near the hot edge is not enough.
+            // Only enter the receiver when the user is actually moving right.
+            // This prevents the "bounce back into MacBook" when returning to the iMac
+            // and then continuing to move left.
+            if dx <= 0 {
+                log("shouldEnterRemote=false moving-away-from-edge x=\(event.location.x) dx=\(dx) threshold=\(threshold)")
+                return false
+            }
+        }
+
         let shouldEnter = edgePolicy.shouldEnterRemote(
             now: now,
             reclaimedAt: reclaimedAt,

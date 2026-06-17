@@ -292,7 +292,7 @@ final class RemoteInput {
         didRequestRelease = false
         lastMouseArrivalAt = nil
         lastMouseApplyAt = nil
-        cursorPoint = CGPoint(x: screen.minX + 5, y: min(max(y, screen.minY + 5), screen.maxY - 5))
+        cursorPoint = CGPoint(x: screen.minX + 2, y: min(max(y, screen.minY + 2), screen.maxY - 2))
 
         let postStartedAt = InputMetrics.nowTicks()
         CGWarpMouseCursorPosition(cursorPoint)

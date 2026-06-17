@@ -37,7 +37,7 @@ final class HandoffTests: XCTestCase {
     func testLocalCooldownPolicyPassesLocalMouseMovementDecision() {
         let policy = EventTapEdgePolicy()
         let decision = policy.localDecision(
-            now: 10.1,
+            now: 10.05,
             reclaimedAt: 10.0,
             x: 1438,
             isMouseMovement: true,
@@ -60,8 +60,8 @@ final class HandoffTests: XCTestCase {
         ))
     }
 
-    func testReclaimWarpInsetIsNotNearHotEdge() {
+    func testNormalReturnAnchorsAtSeam() {
         let policy = EventTapEdgePolicy()
-        XCTAssertLessThanOrEqual(policy.reclaimWarpX(maxX: 1440), 1440 - 160)
+        XCTAssertGreaterThanOrEqual(policy.reclaimWarpX(maxX: 1440), 1438)
     }
 }
