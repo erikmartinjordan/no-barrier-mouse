@@ -15,6 +15,10 @@ let package = Package(
                 .linkedFramework("ApplicationServices"),
                 .linkedFramework("Network")
             ]
+        ),
+        .testTarget(
+            name: "NoBarrierMouseTests",
+            dependencies: ["NoBarrierMouse"]
         )
     ]
 )

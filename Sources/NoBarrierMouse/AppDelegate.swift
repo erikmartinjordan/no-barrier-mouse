@@ -186,7 +186,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 guard let self else { return }
                 if self.role == .receiver {
-                    self.network.send(.returnControl)
+                    self.network.send(.returnControl(y: 0, carryDx: 0, carryDy: 0, handoffID: 0))
                 }
                 self.accessibilityProblem = true
                 self.startAccessibilityTimer()
@@ -202,9 +202,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if self.role == .controller {
                     self.eventTap.reclaimLocalControlFromRemote()
                 } else {
-                    self.network.send(.returnControl)
+                    self.network.send(.returnControl(y: 0, carryDx: 0, carryDy: 0, handoffID: 0))
                 }
             }
+        }
+        remoteInput.onReturnControlRequested = { [weak self] message in
+            guard let self else { return }
+            DispatchQueue.main.async { self.network.send(message) }
         }
         eventTap.onEmergencyOff = { [weak self] in
             self?.e2eTest.recoverFromTrap(reason: "emergency-hotkey", turnOffAfterRecovery: true)
@@ -307,9 +311,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        if (message == .release || message == .returnControl), role == .controller {
+        if case .release = message, role == .controller {
             DispatchQueue.main.async { [eventTap] in
                 eventTap.reclaimLocalControlFromRemote()
+            }
+            return
+        }
+
+        if case .returnControl(let y, let carryDx, let carryDy, let handoffID) = message, role == .controller {
+            DispatchQueue.main.async { [eventTap, network] in
+                eventTap.reclaimLocalControlFromRemote(y: y, carryDx: carryDx, carryDy: carryDy, handoffID: handoffID) {
+                    network.send(.returnControlAck(handoffID: handoffID))
+                }
+            }
+            return
+        }
+
+        if case .returnControlDelta(let handoffID, let dx, let dy) = message, role == .controller {
+            DispatchQueue.main.async { [eventTap] in
+                eventTap.applyReturnControlDelta(handoffID: handoffID, dx: dx, dy: dy)
             }
             return
         }

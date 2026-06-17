@@ -9,10 +9,10 @@ enum EventTapLocalDecision: Equatable {
 }
 
 struct EventTapEdgePolicy {
-    let reclaimAbsorbWindow: CFAbsoluteTime = 0.2
+    let reclaimAbsorbWindow: CFAbsoluteTime = 0.4
     let remoteEntryInset: CGFloat = 12
     let remotePinInset: CGFloat = 32
-    let reclaimWarpInset: CGFloat = 48
+    let reclaimWarpInset: CGFloat = 180
 
     func entryThreshold(maxX: CGFloat) -> CGFloat {
         maxX - remoteEntryInset
@@ -69,7 +69,8 @@ enum ThrottleRate: Double, CaseIterable {
 private enum ControlMode {
     case local
     case remote
-    case reclaiming
+    case reclaimingLocal
+    case localCooldown
 }
 
 final class EventTap {
@@ -92,6 +93,7 @@ final class EventTap {
     private var reclaimedAt: CFAbsoluteTime = 0
     private var modeChangedAt: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
     private var lastRecoveryReason: String?
+    private var activeHandoffID: UInt64?
     private let edgePolicy = EventTapEdgePolicy()
     private let debugLogging = ProcessInfo.processInfo.environment["NO_BARRIER_MOUSE_EVENTTAP_DEBUG"] == "1"
 
@@ -178,9 +180,23 @@ final class EventTap {
         onForwardingChanged?(false)
     }
 
-    func reclaimLocalControlFromRemote() {
+    func reclaimLocalControlFromRemote(y: Double? = nil, carryDx: Double = 0, carryDy: Double = 0, handoffID: UInt64? = nil, completion: (() -> Void)? = nil) {
         performOnTapRunLoop {
-            self.reclaimOnTapThread()
+            self.reclaimOnTapThread(y: y, carryDx: carryDx, carryDy: carryDy, handoffID: handoffID)
+            completion?()
+        }
+    }
+
+    func applyReturnControlDelta(handoffID: UInt64, dx: Double, dy: Double) {
+        performOnTapRunLoop {
+            guard self.activeHandoffID == handoffID else {
+                self.log("stale returnControlDelta ignored handoffID=\(handoffID) active=\(String(describing: self.activeHandoffID))")
+                return
+            }
+            let current = CGEvent(source: nil)?.location ?? CGPoint(x: NSScreenFrame.main.midX, y: NSScreenFrame.main.midY)
+            let final = self.clampLocalPoint(CGPoint(x: current.x + dx, y: current.y + dy))
+            self.log("apply late delta handoffID=\(handoffID) dx=\(dx) dy=\(dy) final=(\(final.x),\(final.y))")
+            self.warpLocalCursor(to: final, reason: "returnControlDelta")
         }
     }
 
@@ -190,17 +206,23 @@ final class EventTap {
         }
     }
 
-    private func reclaimOnTapThread() {
-        clearPendingDelta()
-        setMode(.reclaiming, reason: "reclaim start")
+    private func reclaimOnTapThread(y: Double?, carryDx: Double, carryDy: Double, handoffID: UInt64?) {
+        flushDelta()
+        setMode(.reclaimingLocal, reason: "reclaim start")
+        activeHandoffID = handoffID
         reclaimedAt = CFAbsoluteTimeGetCurrent()
 
         let screen = NSScreenFrame.main
-        warpLocalCursor(to: CGPoint(x: edgePolicy.reclaimWarpX(maxX: screen.maxX), y: pinnedY), reason: "reclaim")
+        let restoreY = y ?? pinnedY
         restoreLocalCursor()
+        let safeStart = CGPoint(x: edgePolicy.reclaimWarpX(maxX: screen.maxX), y: restoreY)
+        let final = clampLocalPoint(CGPoint(x: safeStart.x + CGFloat(carryDx), y: safeStart.y + CGFloat(carryDy)))
+        log("returnControl received handoffID=\(String(describing: handoffID)) y=\(restoreY) carry=(\(carryDx),\(carryDy)) final=(\(final.x),\(final.y))")
+        warpLocalCursor(to: final, reason: "reclaim carry")
 
-        setMode(.local, reason: "reclaim complete")
+        setMode(.localCooldown, reason: "reclaim complete enter cooldown")
         onForwardingChanged?(false)
+        scheduleCooldownExit()
     }
 
     private func performOnTapRunLoop(_ block: @escaping () -> Void) {
@@ -235,7 +257,7 @@ final class EventTap {
         }
 
         switch mode {
-        case .local:
+        case .local, .localCooldown:
             if shouldEnterRemote(type: type, event: event) {
                 enterRemoteControl(at: event.location.y)
                 log("consume event for remote entry type=\(type.rawValue) x=\(event.location.x)")
@@ -256,11 +278,7 @@ final class EventTap {
             forward(type: type, event: event)
             return nil
 
-        case .reclaiming:
-            if isMouseMovement(type) {
-                log("consume movement while reclaiming x=\(event.location.x)")
-                return nil
-            }
+        case .reclaimingLocal:
             return Unmanaged.passRetained(event)
         }
     }
@@ -273,6 +291,9 @@ final class EventTap {
     }
 
     private func shouldEnterRemote(type: CGEventType, event: CGEvent) -> Bool {
+        if mode == .localCooldown {
+            return false
+        }
         let now = CFAbsoluteTimeGetCurrent()
         let cooldownAge = now - reclaimedAt
         let threshold = edgePolicy.entryThreshold(maxX: NSScreenFrame.main.maxX)
@@ -425,6 +446,26 @@ final class EventTap {
         emitDiagnosticsEvent("modeChanged", extra: ["reason": reason])
     }
 
+    private func clampLocalPoint(_ point: CGPoint) -> CGPoint {
+        let screen = NSScreenFrame.main
+        return CGPoint(
+            x: min(max(point.x, screen.minX + 1), screen.maxX - 2),
+            y: min(max(point.y, screen.minY + 1), screen.maxY - 2)
+        )
+    }
+
+    private func scheduleCooldownExit() {
+        let handoffID = activeHandoffID
+        DispatchQueue.main.asyncAfter(deadline: .now() + edgePolicy.reclaimAbsorbWindow) { [weak self] in
+            self?.performOnTapRunLoop {
+                guard let self, self.mode == .localCooldown, self.activeHandoffID == handoffID else { return }
+                self.log("exiting localCooldown handoffID=\(String(describing: handoffID))")
+                self.activeHandoffID = nil
+                self.setMode(.local, reason: "localCooldown expired")
+            }
+        }
+    }
+
     private func warpLocalCursor(to point: CGPoint, reason: String) {
         log("warp reason=\(reason) x=\(point.x) y=\(point.y) entryThreshold=\(edgePolicy.entryThreshold(maxX: NSScreenFrame.main.maxX))")
         CGWarpMouseCursorPosition(point)
@@ -470,6 +511,7 @@ final class EventTap {
     private func emergencyRecoverOnTapThread(reason: String) {
         lastRecoveryReason = reason
         clearPendingDelta()
+        activeHandoffID = nil
         restoreLocalCursor()
         setMode(.local, reason: "emergency recovery: \(reason)")
         let screen = NSScreenFrame.main
