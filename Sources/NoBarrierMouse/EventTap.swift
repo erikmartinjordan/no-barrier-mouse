@@ -9,10 +9,10 @@ enum EventTapLocalDecision: Equatable {
 }
 
 struct EventTapEdgePolicy {
-    let reclaimAbsorbWindow: CFAbsoluteTime = 0.2
+    let reclaimAbsorbWindow: CFAbsoluteTime = 0.05
     let remoteEntryInset: CGFloat = 12
     let remotePinInset: CGFloat = 32
-    let reclaimWarpInset: CGFloat = 48
+    let reclaimWarpInset: CGFloat = 4
 
     func entryThreshold(maxX: CGFloat) -> CGFloat {
         maxX - remoteEntryInset
