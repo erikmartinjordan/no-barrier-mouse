@@ -5,6 +5,7 @@ import Foundation
 
 final class RemoteInput {
     var onReleaseRequested: (() -> Void)?
+    var onReturnControlRequested: ((WireMessage) -> Void)?
     var onInputPostingBlocked: (() -> Void)?
     var suppressPermissionSideEffects = false
 
@@ -13,8 +14,16 @@ final class RemoteInput {
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
+    private enum RemoteInputMode: Equatable {
+        case inactive
+        case active
+        case handoffPending(id: UInt64)
+    }
+
     private var didRequestRelease = false
-    private var isRemoteActive = false
+    private var mode: RemoteInputMode = .inactive
+    private var isRemoteActive: Bool { mode != .inactive }
+    private var nextHandoffID: UInt64 = 1
     private lazy var cursorPoint: CGPoint = currentMousePoint()
     private var lastMouseArrivalAt: UInt64?
     private var lastMouseApplyAt: UInt64?
@@ -86,8 +95,11 @@ final class RemoteInput {
         case .release:
             leaveRemote()
         case .returnControl:
-            leaveRemote()
-            onReleaseRequested?()
+            break
+        case .returnControlDelta:
+            break
+        case .returnControlAck(let handoffID):
+            receiveReturnControlAck(handoffID: handoffID)
         case .hello,
              .ping,
              .pong,
@@ -100,7 +112,7 @@ final class RemoteInput {
     }
 
     func reset() {
-        isRemoteActive = false
+        mode = .inactive
         pressedButton = nil
         didRequestRelease = false
         lastMouseArrivalAt = nil
@@ -112,6 +124,7 @@ final class RemoteInput {
     func diagnosticsSnapshot() -> [String: Any] {
         [
             "isRemoteActive": isRemoteActive,
+            "remoteInputMode": "\(mode)",
             "cursorX": cursorPoint.x,
             "cursorY": cursorPoint.y,
             "pressedButton": pressedButton ?? NSNull(),
@@ -172,15 +185,49 @@ final class RemoteInput {
         CGEvent(source: nil)?.location ?? CGPoint(x: mainScreen.midX, y: mainScreen.midY)
     }
 
-    private func moveMouse(dx: Double, dy: Double) -> UInt64? {
-        let screen = mainScreen
-        cursorPoint.x = min(max(cursorPoint.x + dx, screen.minX), screen.maxX - 2)
-        cursorPoint.y = min(max(cursorPoint.y + dy, screen.minY), screen.maxY - 2)
+    static func leftEdgeHandoff(
+        start: CGPoint,
+        dx: Double,
+        dy: Double,
+        boundaryX: CGFloat
+    ) -> (yAtBoundary: Double, carryDx: Double, carryDy: Double) {
+        let t = (Double(boundaryX) - Double(start.x)) / dx
+        let clampedT = min(max(t, 0), 1)
+        let yAtBoundary = Double(start.y) + clampedT * dy
+        let carryDx = (1 - clampedT) * dx
+        let carryDy = (1 - clampedT) * dy
+        return (yAtBoundary, carryDx, carryDy)
+    }
 
-        if cursorPoint.x <= screen.minX + 1 {
-            requestReleaseIfNeeded()
+    private func moveMouse(dx: Double, dy: Double) -> UInt64? {
+        switch mode {
+        case .inactive:
+            return nil
+        case .handoffPending(let id):
+            if dx != 0 || dy != 0 {
+                log("late delta handoffID=\(id) dx=\(dx) dy=\(dy)")
+                onReturnControlRequested?(.returnControlDelta(handoffID: id, dx: dx, dy: dy))
+            }
+            return nil
+        case .active:
+            break
+        }
+
+        let screen = mainScreen
+        let start = cursorPoint
+        let proposed = CGPoint(x: start.x + dx, y: start.y + dy)
+        let boundaryX = screen.minX + 1
+
+        if dx < 0, proposed.x <= boundaryX {
+            let handoff = Self.leftEdgeHandoff(start: start, dx: dx, dy: dy, boundaryX: boundaryX)
+            let yAtBoundary = min(max(CGFloat(handoff.yAtBoundary), screen.minY), screen.maxY - 2)
+            cursorPoint = CGPoint(x: boundaryX, y: yAtBoundary)
+            requestReturnControlIfNeeded(y: Double(yAtBoundary), carryDx: handoff.carryDx, carryDy: handoff.carryDy, start: start, proposed: proposed)
             return nil
         }
+
+        cursorPoint.x = min(max(proposed.x, screen.minX), screen.maxX - 2)
+        cursorPoint.y = min(max(proposed.y, screen.minY), screen.maxY - 2)
 
         didRequestRelease = false
         let postStartedAt = InputMetrics.nowTicks()
@@ -188,6 +235,25 @@ final class RemoteInput {
         postMove(at: cursorPoint, startedAt: postStartedAt)
         InputMetrics.shared.record(.mouseApplyTick, from: postStartedAt)
         return postStartedAt
+    }
+
+    private func requestReturnControlIfNeeded(y: Double, carryDx: Double, carryDy: Double, start: CGPoint, proposed: CGPoint) {
+        guard case .active = mode, !didRequestRelease else { return }
+        didRequestRelease = true
+        let id = nextHandoffID
+        nextHandoffID &+= 1
+        mode = .handoffPending(id: id)
+        log("left-edge handoffID=\(id) start=(\(start.x),\(start.y)) proposed=(\(proposed.x),\(proposed.y)) y=\(y) carry=(\(carryDx),\(carryDy))")
+        onReturnControlRequested?(.returnControl(y: y, carryDx: carryDx, carryDy: carryDy, handoffID: id))
+    }
+
+    private func receiveReturnControlAck(handoffID: UInt64) {
+        guard case .handoffPending(let id) = mode, id == handoffID else {
+            log("stale ACK ignored handoffID=\(handoffID) mode=\(mode)")
+            return
+        }
+        log("ACK received handoffID=\(handoffID)")
+        leaveRemote()
     }
 
     private func requestReleaseIfNeeded() {
@@ -221,12 +287,12 @@ final class RemoteInput {
 
     private func enterFromLeftEdge(at y: Double) {
         let screen = mainScreen
-        isRemoteActive = true
+        mode = .active
         pressedButton = nil
         didRequestRelease = false
         lastMouseArrivalAt = nil
         lastMouseApplyAt = nil
-        cursorPoint = CGPoint(x: screen.minX + 5, y: min(max(y, screen.minY + 5), screen.maxY - 5))
+        cursorPoint = CGPoint(x: screen.minX + 2, y: min(max(y, screen.minY + 2), screen.maxY - 2))
 
         let postStartedAt = InputMetrics.nowTicks()
         CGWarpMouseCursorPosition(cursorPoint)
@@ -234,7 +300,7 @@ final class RemoteInput {
     }
 
     private func leaveRemote() {
-        isRemoteActive = false
+        mode = .inactive
         pressedButton = nil
         didRequestRelease = false
         lastMouseArrivalAt = nil
@@ -246,7 +312,7 @@ final class RemoteInput {
         benchmarkRecorder = MouseBenchmarkRecorder(id: id, sampleRate: sampleRate, expectedSamples: sampleCount, transport: transport)
 
         let screen = mainScreen
-        isRemoteActive = true
+        mode = .active
         pressedButton = nil
         didRequestRelease = false
         lastMouseArrivalAt = nil
@@ -313,6 +379,11 @@ final class RemoteInput {
             event.post(tap: .cghidEventTap)
         }
         InputMetrics.shared.record(.cgEventPost, from: startedAt)
+    }
+
+    private func log(_ message: String) {
+        guard ProcessInfo.processInfo.environment["NO_BARRIER_MOUSE_EVENTTAP_DEBUG"] == "1" else { return }
+        NSLog("[NoBarrierMouse.RemoteInput] %@", message)
     }
 
     private func isCursorEvent(_ type: CGEventType) -> Bool {

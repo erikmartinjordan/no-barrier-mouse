@@ -12,7 +12,9 @@ enum WireMessage: Equatable {
     case activate
     case enter(y: Double)
     case release
-    case returnControl
+    case returnControl(y: Double, carryDx: Double, carryDy: Double, handoffID: UInt64)
+    case returnControlDelta(handoffID: UInt64, dx: Double, dy: Double)
+    case returnControlAck(handoffID: UInt64)
     case ping(id: UInt32, sentAt: UInt64)
     case pong(id: UInt32, sentAt: UInt64)
     case benchmarkStart(id: UInt32, sampleRate: UInt16, sampleCount: UInt16, transport: String)
@@ -68,8 +70,20 @@ final class WireCodec {
             data.appendFloat32LE(Float32(y))
         case .release:
             data.appendByte(9)
-        case .returnControl:
+        case .returnControl(let y, let carryDx, let carryDy, let handoffID):
             data.appendByte(10)
+            data.appendFloat32LE(Float32(y))
+            data.appendFloat32LE(Float32(carryDx))
+            data.appendFloat32LE(Float32(carryDy))
+            data.appendUInt64LE(handoffID)
+        case .returnControlDelta(let handoffID, let dx, let dy):
+            data.appendByte(20)
+            data.appendUInt64LE(handoffID)
+            data.appendFloat32LE(Float32(dx))
+            data.appendFloat32LE(Float32(dy))
+        case .returnControlAck(let handoffID):
+            data.appendByte(21)
+            data.appendUInt64LE(handoffID)
         case .ping(let id, let sentAt):
             data.appendByte(11)
             data.appendUInt32LE(id)
@@ -154,7 +168,14 @@ final class WireCodec {
         case 9:
             return .release
         case 10:
-            return .returnControl
+            guard offset < data.count else {
+                return .returnControl(y: 0, carryDx: 0, carryDy: 0, handoffID: 0)
+            }
+            guard let y = data.readFloat32LE(at: &offset),
+                  let carryDx = data.readFloat32LE(at: &offset),
+                  let carryDy = data.readFloat32LE(at: &offset),
+                  let handoffID = data.readUInt64LE(at: &offset) else { return nil }
+            return .returnControl(y: Double(y), carryDx: Double(carryDx), carryDy: Double(carryDy), handoffID: handoffID)
         case 11:
             guard let id = data.readUInt32LE(at: &offset),
                   let sentAt = data.readUInt64LE(at: &offset) else { return nil }
@@ -188,6 +209,14 @@ final class WireCodec {
         case 18:
             guard let cycle = data.readUInt16LE(at: &offset) else { return nil }
             return .testClipboardPrepareCopy(cycle: cycle)
+        case 20:
+            guard let handoffID = data.readUInt64LE(at: &offset),
+                  let dx = data.readFloat32LE(at: &offset),
+                  let dy = data.readFloat32LE(at: &offset) else { return nil }
+            return .returnControlDelta(handoffID: handoffID, dx: Double(dx), dy: Double(dy))
+        case 21:
+            guard let handoffID = data.readUInt64LE(at: &offset) else { return nil }
+            return .returnControlAck(handoffID: handoffID)
         case 19:
             guard let cycle = data.readUInt16LE(at: &offset),
                   let pasteRaw = data.readByte(at: &offset),
