@@ -13,6 +13,7 @@ final class RemoteInput {
     private var lastClickTime: CFAbsoluteTime = 0
     private var lastClickCount: Int = 0
     private var pressedButton: Int?
+    private var pressedModifierKeyCodes = Set<UInt16>()
     private var didRequestRelease = false
     private var isRemoteActive = false
     private lazy var cursorPoint: CGPoint = currentMousePoint()
@@ -72,6 +73,7 @@ final class RemoteInput {
             keyEventsPosted += 1
         case .flags(let code, let flags):
             recordKeyEvent(code: code, down: flags != 0, flags: flags)
+            updateTrackedModifiers(code: code, flags: CGEventFlags(wireValue: flags))
             guard isRemoteActive, canPostInputEvents() else { return }
             let postStartedAt = InputMetrics.nowTicks()
             let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: flags != 0)
@@ -101,7 +103,7 @@ final class RemoteInput {
 
     func reset() {
         isRemoteActive = false
-        pressedButton = nil
+        releaseTrackedInputState()
         didRequestRelease = false
         lastMouseArrivalAt = nil
         lastMouseApplyAt = nil
@@ -115,6 +117,7 @@ final class RemoteInput {
             "cursorX": cursorPoint.x,
             "cursorY": cursorPoint.y,
             "pressedButton": pressedButton ?? NSNull(),
+            "pressedModifierKeyCodes": pressedModifierKeyCodes.sorted(),
             "didRequestRelease": didRequestRelease,
             "lastMouseArrivalAt": lastMouseArrivalAt.map(String.init) ?? NSNull(),
             "lastMouseApplyAt": lastMouseApplyAt.map(String.init) ?? NSNull(),
@@ -223,6 +226,7 @@ final class RemoteInput {
         let screen = mainScreen
         isRemoteActive = true
         pressedButton = nil
+        pressedModifierKeyCodes.removeAll()
         didRequestRelease = false
         lastMouseArrivalAt = nil
         lastMouseApplyAt = nil
@@ -235,10 +239,48 @@ final class RemoteInput {
 
     private func leaveRemote() {
         isRemoteActive = false
-        pressedButton = nil
+        releaseTrackedInputState()
         didRequestRelease = false
         lastMouseArrivalAt = nil
         lastMouseApplyAt = nil
+    }
+
+    private func releaseTrackedInputState() {
+        if let button = pressedButton, canPostInputEvents() {
+            postMouse(button: button, down: false)
+        }
+        pressedButton = nil
+
+        guard canPostInputEvents() else {
+            pressedModifierKeyCodes.removeAll()
+            return
+        }
+        for code in pressedModifierKeyCodes {
+            let event = CGEvent(keyboardEventSource: eventSource, virtualKey: code, keyDown: false)
+            event?.flags = []
+            post(event, startedAt: InputMetrics.nowTicks())
+        }
+        pressedModifierKeyCodes.removeAll()
+    }
+
+    private func updateTrackedModifiers(code: UInt16, flags: CGEventFlags) {
+        let modifierKeys: [UInt16: CGEventFlags] = [
+            54: .maskCommand,
+            55: .maskCommand,
+            58: .maskAlternate,
+            61: .maskAlternate,
+            59: .maskControl,
+            62: .maskControl,
+            56: .maskShift,
+            60: .maskShift,
+            63: .maskSecondaryFn
+        ]
+        guard let flag = modifierKeys[code] else { return }
+        if flags.contains(flag) {
+            pressedModifierKeyCodes.insert(code)
+        } else {
+            pressedModifierKeyCodes.remove(code)
+        }
     }
 
     private func startBenchmark(id: UInt32, sampleRate: UInt16, sampleCount: UInt16, transport: String) {
@@ -248,6 +290,7 @@ final class RemoteInput {
         let screen = mainScreen
         isRemoteActive = true
         pressedButton = nil
+        pressedModifierKeyCodes.removeAll()
         didRequestRelease = false
         lastMouseArrivalAt = nil
         lastMouseApplyAt = nil

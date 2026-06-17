@@ -9,7 +9,7 @@ enum EventTapLocalDecision: Equatable {
 }
 
 struct EventTapEdgePolicy {
-    let reclaimAbsorbWindow: CFAbsoluteTime = 0.2
+    let reclaimAbsorbWindow: CFAbsoluteTime = 0.5
     let remoteEntryInset: CGFloat = 12
     let remotePinInset: CGFloat = 32
     let reclaimWarpInset: CGFloat = 48
@@ -30,20 +30,25 @@ struct EventTapEdgePolicy {
         now: CFAbsoluteTime,
         reclaimedAt: CFAbsoluteTime,
         x: CGFloat,
+        dx: Double,
         isMouseMovement: Bool,
         keyboardShortcut: Bool,
         maxX: CGFloat
     ) -> Bool {
-        if now - reclaimedAt < reclaimAbsorbWindow {
+        if keyboardShortcut {
+            return true
+        }
+        if isMouseMovement && now - reclaimedAt < reclaimAbsorbWindow {
             return false
         }
-        return (isMouseMovement && x >= entryThreshold(maxX: maxX)) || keyboardShortcut
+        return isMouseMovement && x >= entryThreshold(maxX: maxX) && dx > 0
     }
 
     func localDecision(
         now: CFAbsoluteTime,
         reclaimedAt: CFAbsoluteTime,
         x: CGFloat,
+        dx: Double,
         isMouseMovement: Bool,
         keyboardShortcut: Bool,
         maxX: CGFloat
@@ -52,6 +57,7 @@ struct EventTapEdgePolicy {
             now: now,
             reclaimedAt: reclaimedAt,
             x: x,
+            dx: dx,
             isMouseMovement: isMouseMovement,
             keyboardShortcut: keyboardShortcut,
             maxX: maxX
@@ -92,6 +98,9 @@ final class EventTap {
     private var reclaimedAt: CFAbsoluteTime = 0
     private var modeChangedAt: CFAbsoluteTime = CFAbsoluteTimeGetCurrent()
     private var lastRecoveryReason: String?
+    private var remoteSessionID: UInt64 = 0
+    private var activeModifierKeyCodes = Set<UInt16>()
+    private var activeMouseButtons = Set<Int>()
     private let edgePolicy = EventTapEdgePolicy()
     private let debugLogging = ProcessInfo.processInfo.environment["NO_BARRIER_MOUSE_EVENTTAP_DEBUG"] == "1"
 
@@ -191,16 +200,7 @@ final class EventTap {
     }
 
     private func reclaimOnTapThread() {
-        clearPendingDelta()
-        setMode(.reclaiming, reason: "reclaim start")
-        reclaimedAt = CFAbsoluteTimeGetCurrent()
-
-        let screen = NSScreenFrame.main
-        warpLocalCursor(to: CGPoint(x: edgePolicy.reclaimWarpX(maxX: screen.maxX), y: pinnedY), reason: "reclaim")
-        restoreLocalCursor()
-
-        setMode(.local, reason: "reclaim complete")
-        onForwardingChanged?(false)
+        hardResetToLocal(reason: "remote reclaim")
     }
 
     private func performOnTapRunLoop(_ block: @escaping () -> Void) {
@@ -290,6 +290,7 @@ final class EventTap {
             now: now,
             reclaimedAt: reclaimedAt,
             x: event.location.x,
+            dx: isMovement ? event.getDoubleValueField(.mouseEventDeltaX) : 0,
             isMouseMovement: isMovement,
             keyboardShortcut: keyboard,
             maxX: NSScreenFrame.main.maxX
@@ -302,7 +303,10 @@ final class EventTap {
     }
 
     private func enterRemoteControl(at y: Double) {
-        setMode(.remote, reason: "enter remote")
+        remoteSessionID &+= 1
+        activeModifierKeyCodes.removeAll()
+        activeMouseButtons.removeAll()
+        setMode(.remote, reason: "enter remote session=\(remoteSessionID)")
         suppressLocalCursor()
         sendCaptured(.enter(y: y))
         onForwardingChanged?(true)
@@ -445,6 +449,7 @@ final class EventTap {
             "mode": "\(mode)",
             "isForwarding": isForwarding,
             "isConnected": isConnected,
+            "remoteSessionID": remoteSessionID,
             "localCursorSuppressed": localCursorSuppressed,
             "cursorX": cursor.x,
             "cursorY": cursor.y,
@@ -455,7 +460,11 @@ final class EventTap {
             "pinnedY": pinnedY,
             "pendingDeltaX": pendingDelta.x,
             "pendingDeltaY": pendingDelta.y,
+            "scheduledDeltaFlushExists": scheduledDeltaFlush != nil,
+            "reclaimedAt": reclaimedAt,
             "reclaimedAgeSeconds": now - reclaimedAt,
+            "activeModifierKeyCodes": activeModifierKeyCodes.sorted(),
+            "activeMouseButtons": activeMouseButtons.sorted(),
             "modeAgeSeconds": now - modeChangedAt,
             "lastRecoveryReason": lastRecoveryReason ?? NSNull()
         ]
@@ -469,13 +478,31 @@ final class EventTap {
 
     private func emergencyRecoverOnTapThread(reason: String) {
         lastRecoveryReason = reason
-        clearPendingDelta()
-        restoreLocalCursor()
-        setMode(.local, reason: "emergency recovery: \(reason)")
-        let screen = NSScreenFrame.main
-        warpLocalCursor(to: CGPoint(x: screen.midX, y: screen.midY), reason: "emergency recovery")
+        hardResetToLocal(reason: "emergency recovery: \(reason)", warpToCenter: true)
         emitDiagnosticsEvent("emergencyRecovery", extra: ["reason": reason])
+    }
+
+    private func hardResetToLocal(reason: String, warpToCenter: Bool = false) {
+        let now = CFAbsoluteTimeGetCurrent()
+        setMode(.reclaiming, reason: "hard reset start: \(reason)")
+        scheduledDeltaFlush?.cancel()
+        scheduledDeltaFlush = nil
+        pendingDelta = .zero
+        pendingDeltaStartedAt = nil
+        lastDeltaSend = now
+        lastCursorPinAt = 0
+        activeModifierKeyCodes.removeAll()
+        activeMouseButtons.removeAll()
+        reclaimedAt = now
+        restoreLocalCursor()
+
+        let screen = NSScreenFrame.main
+        let x = warpToCenter ? screen.midX : edgePolicy.reclaimWarpX(maxX: screen.maxX)
+        let y = warpToCenter ? screen.midY : pinnedY
+        warpLocalCursor(to: CGPoint(x: x, y: y), reason: reason)
+        setMode(.local, reason: "hard reset complete: \(reason)")
         onForwardingChanged?(false)
+        emitDiagnosticsEvent("hardReclaim", extra: ["reason": reason])
     }
 
     private func emitDiagnosticsEvent(_ name: String, extra: [String: Any] = [:]) {
@@ -513,21 +540,27 @@ final class EventTap {
             pinLocalCursorIfNeeded()
         case .leftMouseDown:
             flushDelta()
+            activeMouseButtons.insert(0)
             sendCaptured(.mouseDown(button: 0))
         case .leftMouseUp:
             flushDelta()
+            activeMouseButtons.remove(0)
             sendCaptured(.mouseUp(button: 0))
         case .rightMouseDown:
             flushDelta()
+            activeMouseButtons.insert(1)
             sendCaptured(.mouseDown(button: 1))
         case .rightMouseUp:
             flushDelta()
+            activeMouseButtons.remove(1)
             sendCaptured(.mouseUp(button: 1))
         case .otherMouseDown:
             flushDelta()
+            activeMouseButtons.insert(2)
             sendCaptured(.mouseDown(button: 2))
         case .otherMouseUp:
             flushDelta()
+            activeMouseButtons.remove(2)
             sendCaptured(.mouseUp(button: 2))
         case .scrollWheel:
             let dy = event.getDoubleValueField(.scrollWheelEventDeltaAxis1)
@@ -541,9 +574,30 @@ final class EventTap {
             sendCaptured(.key(code: code, down: false, flags: event.flags.wireValue))
         case .flagsChanged:
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+            updateTrackedModifiers(code: code, flags: event.flags)
             sendCaptured(.flags(code: code, flags: event.flags.wireValue))
         default:
             break
+        }
+    }
+
+    private func updateTrackedModifiers(code: UInt16, flags: CGEventFlags) {
+        let modifierKeys: [UInt16: CGEventFlags] = [
+            54: .maskCommand,
+            55: .maskCommand,
+            58: .maskAlternate,
+            61: .maskAlternate,
+            59: .maskControl,
+            62: .maskControl,
+            56: .maskShift,
+            60: .maskShift,
+            63: .maskSecondaryFn
+        ]
+        guard let flag = modifierKeys[code] else { return }
+        if flags.contains(flag) {
+            activeModifierKeyCodes.insert(code)
+        } else {
+            activeModifierKeyCodes.remove(code)
         }
     }
 }
