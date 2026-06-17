@@ -9,10 +9,10 @@ enum EventTapLocalDecision: Equatable {
 }
 
 struct EventTapEdgePolicy {
-    let reclaimAbsorbWindow: CFAbsoluteTime = 0.10
+    let reclaimAbsorbWindow: CFAbsoluteTime = 0.0 // DELIVERY FIX: no post-reclaim event absorption
     let remoteEntryInset: CGFloat = 12
     let remotePinInset: CGFloat = 2
-    let reclaimWarpInset: CGFloat = 1
+    let reclaimWarpInset: CGFloat = 24 // normal seam inset
 
     func entryThreshold(maxX: CGFloat) -> CGFloat {
         maxX - remoteEntryInset
@@ -221,7 +221,7 @@ final class EventTap {
         let screen = NSScreenFrame.main
         let restoreY = y ?? pinnedY
 
-        restoreLocalCursor()
+        // DELIVERY FIX: restore cursor after warp, not before.
 
         // Normal return should anchor at the iMac right seam, not 180 px inside.
         // Re-entry prevention is handled by localCooldown/shouldEnterRemote, not geometry.
@@ -234,9 +234,12 @@ final class EventTap {
         log("returnControl received handoffID=\(String(describing: handoffID)) y=\(restoreY) carry=(\(carryDx),\(carryDy)) pendingCarry=(\(pendingCarryX),\(pendingCarryY)) final=(\(final.x),\(final.y))")
         warpLocalCursor(to: final, reason: "reclaim seam carry")
 
-        setMode(.localCooldown, reason: "reclaim complete enter seam guard")
+        // DELIVERY FIX:
+        // We land far inside the iMac, so we do not need localCooldown here.
+        // localCooldown creates a visible pause after reclaim.
+        setMode(.local, reason: "reclaim complete")
+        restoreLocalCursor()
         onForwardingChanged?(false)
-        scheduleCooldownExit()
     }
 
     private func performOnTapRunLoop(_ block: @escaping () -> Void) {
