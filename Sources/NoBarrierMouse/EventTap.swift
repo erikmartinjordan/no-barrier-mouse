@@ -71,6 +71,7 @@ private enum ControlMode {
     case remote
     case reclaimingLocal
     case localCooldown
+    case localSyntheticHandoff
 }
 
 final class EventTap {
@@ -96,6 +97,13 @@ final class EventTap {
     private var activeHandoffID: UInt64?
     private let edgePolicy = EventTapEdgePolicy()
     private let debugLogging = ProcessInfo.processInfo.environment["NO_BARRIER_MOUSE_EVENTTAP_DEBUG"] == "1"
+
+    private var syntheticHandoffPoint: CGPoint?
+    private var syntheticHandoffStartedAt: CFAbsoluteTime = 0
+    private var syntheticHandoffLastMovementAt: CFAbsoluteTime = 0
+    private var syntheticHandoffEventCount: Int = 0
+    private var syntheticHandoffQuietCount: Int = 0
+    private var localEventLogCount: Int = 0
 
     @discardableResult
     func start() -> Bool {
@@ -163,6 +171,7 @@ final class EventTap {
         tapRunLoop = nil
         isConnected = false
         clearPendingDelta()
+        exitSyntheticHandoffIfActive(reason: "stop")
         restoreLocalCursor()
         setMode(.local, reason: "stop")
     }
@@ -175,6 +184,7 @@ final class EventTap {
 
     private func releaseOnTapThread() {
         flushDelta()
+        exitSyntheticHandoffIfActive(reason: "releaseLocalControl")
         restoreLocalCursor()
         setMode(.local, reason: "releaseLocalControl")
         onForwardingChanged?(false)
@@ -207,6 +217,9 @@ final class EventTap {
     }
 
     private func reclaimOnTapThread(y: Double?, carryDx: Double, carryDy: Double, handoffID: UInt64?) {
+        let tStart = CFAbsoluteTimeGetCurrent()
+        NSLog("[NoBarrierMouse.Reclaim] reclaimStart handoffID=\(handoffID ?? 0)")
+
         // Do not flush these deltas back to the receiver during return handoff.
         // At this point the receiver has already crossed the seam, so pending physical
         // mouse movement belongs on the controller side.
@@ -214,32 +227,53 @@ final class EventTap {
         let pendingCarryY = pendingDelta.y
         clearPendingDelta()
 
+        let t1 = CFAbsoluteTimeGetCurrent()
+        NSLog("[NoBarrierMouse.Reclaim] pendingDelta dur=\((t1-tStart)*1000)")
+
         setMode(.reclaimingLocal, reason: "reclaim start")
         activeHandoffID = handoffID
         reclaimedAt = CFAbsoluteTimeGetCurrent()
 
+        let t2 = CFAbsoluteTimeGetCurrent()
+        NSLog("[NoBarrierMouse.Reclaim] setModeReclaiming dur=\((t2-t1)*1000)")
+
         let screen = NSScreenFrame.main
         let restoreY = y ?? pinnedY
 
-        // DELIVERY FIX: restore cursor after warp, not before.
-
-        // Normal return should anchor at the iMac right seam, not 180 px inside.
-        // Re-entry prevention is handled by localCooldown/shouldEnterRemote, not geometry.
         let seamStart = CGPoint(x: edgePolicy.reclaimWarpX(maxX: screen.maxX), y: restoreY)
         let final = clampLocalPoint(CGPoint(
             x: seamStart.x + CGFloat(carryDx) + pendingCarryX,
             y: seamStart.y + CGFloat(carryDy) + pendingCarryY
         ))
 
+        let t3 = CFAbsoluteTimeGetCurrent()
+        NSLog("[NoBarrierMouse.Reclaim] calcPoints dur=\((t3-t2)*1000)")
+
         log("returnControl received handoffID=\(String(describing: handoffID)) y=\(restoreY) carry=(\(carryDx),\(carryDy)) pendingCarry=(\(pendingCarryX),\(pendingCarryY)) final=(\(final.x),\(final.y))")
         warpLocalCursor(to: final, reason: "reclaim seam carry")
 
-        // DELIVERY FIX:
-        // We land far inside the iMac, so we do not need localCooldown here.
-        // localCooldown creates a visible pause after reclaim.
-        setMode(.local, reason: "reclaim complete")
-        restoreLocalCursor()
+        let t4 = CFAbsoluteTimeGetCurrent()
+        NSLog("[NoBarrierMouse.Reclaim] warp dur=\((t4-t3)*1000)")
+
+        // Enter synthetic handoff: cursor hidden+disassociated from .remote mode.
+        // Show cursor so user can see it, but keep CGAssociate(0) active.
+        // We own cursor movement until exit.
+        setMode(.localSyntheticHandoff, reason: "reclaim complete")
+        CGDisplayShowCursor(CGMainDisplayID())
+        localEventLogCount = 0
+        let now = CFAbsoluteTimeGetCurrent()
+        syntheticHandoffPoint = final
+        syntheticHandoffStartedAt = now
+        syntheticHandoffLastMovementAt = now
+        syntheticHandoffEventCount = 0
+        syntheticHandoffQuietCount = 0
+        NSLog("[NoBarrierMouse.Handoff] entry point=(\(final.x),\(final.y))")
+
         onForwardingChanged?(false)
+
+        let t5 = CFAbsoluteTimeGetCurrent()
+        NSLog("[NoBarrierMouse.Reclaim] onForwardingChanged dur=\((t5-t4)*1000)")
+        NSLog("[NoBarrierMouse.Reclaim] reclaimTotal ms=\((t5-tStart)*1000)")
     }
 
     private func performOnTapRunLoop(_ block: @escaping () -> Void) {
@@ -274,11 +308,31 @@ final class EventTap {
         }
 
         switch mode {
+        case .localSyntheticHandoff:
+            if handleSyntheticHandoff(type: type, event: event) {
+                return nil
+            }
+            if mode == .localSyntheticHandoff {
+                exitSyntheticHandoff(reason: "interrupted by \(type)")
+            }
+            if mode == .local, shouldEnterRemote(type: type, event: event) {
+                enterRemoteControl(at: event.location.y)
+                log("consume event for remote entry type=\(type.rawValue) x=\(event.location.x)")
+                return nil
+            }
+            return Unmanaged.passRetained(event)
+
         case .local, .localCooldown:
             if shouldEnterRemote(type: type, event: event) {
                 enterRemoteControl(at: event.location.y)
                 log("consume event for remote entry type=\(type.rawValue) x=\(event.location.x)")
                 return nil
+            }
+
+            if isMouseMovement(type) && localEventLogCount < 10 {
+                localEventLogCount += 1
+                let cursor = CGEvent(source: nil)?.location ?? .zero
+                NSLog("[NoBarrierMouse.LocalEvent] localEvent_\(localEventLogCount) type=\(type.rawValue) eventX=\(event.location.x) eventY=\(event.location.y) dx=\(event.getDoubleValueField(.mouseEventDeltaX)) dy=\(event.getDoubleValueField(.mouseEventDeltaY)) cursorX=\(cursor.x) cursorY=\(cursor.y)")
             }
 
             return Unmanaged.passRetained(event)
@@ -502,6 +556,91 @@ final class EventTap {
         CGWarpMouseCursorPosition(point)
     }
 
+    private func handleSyntheticHandoff(type: CGEventType, event: CGEvent) -> Bool {
+        guard isMouseMovement(type) else { return false }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        let age = now - syntheticHandoffStartedAt
+
+        if age > 0.20 {
+            exitSyntheticHandoff(reason: "maxTime", age: age)
+            return false
+        }
+
+        let rawDx = event.getDoubleValueField(.mouseEventDeltaX)
+        let rawDy = event.getDoubleValueField(.mouseEventDeltaY)
+        guard let point = syntheticHandoffPoint else {
+            exitSyntheticHandoff(reason: "noPoint", age: age)
+            return false
+        }
+
+        syntheticHandoffEventCount += 1
+
+        if syntheticHandoffEventCount > 25 {
+            exitSyntheticHandoff(reason: "maxEvents", age: age)
+            return false
+        }
+
+        if rawDx == 0 && rawDy == 0 {
+            let quietDuration = now - syntheticHandoffLastMovementAt
+            if quietDuration > 0.05 {
+                exitSyntheticHandoff(reason: "timeQuiet", age: age)
+                return false
+            }
+            return true
+        }
+
+        syntheticHandoffLastMovementAt = now
+
+        if abs(rawDx) < 8 && abs(rawDy) < 8 {
+            syntheticHandoffQuietCount += 1
+            if syntheticHandoffQuietCount >= 2 {
+                exitSyntheticHandoff(reason: "quiet", age: age)
+                return false
+            }
+        } else {
+            syntheticHandoffQuietCount = 0
+        }
+
+        let gain: CGFloat = 0.6
+        var dx = CGFloat(rawDx) * gain
+        var dy = CGFloat(rawDy) * gain
+        dx = max(-80, min(80, dx))
+        dy = max(-80, min(80, dy))
+        let next = clampLocalPoint(CGPoint(x: point.x + dx, y: point.y + dy))
+        let realCursor = CGEvent(source: nil)?.location ?? .zero
+        NSLog("[NoBarrierMouse.Handoff] move count=\(syntheticHandoffEventCount) rawDx=\(rawDx) rawDy=\(rawDy) dx=\(dx) dy=\(dy) from=(\(point.x),\(point.y)) to=(\(next.x),\(next.y)) event=(\(event.location.x),\(event.location.y)) realCursor=(\(realCursor.x),\(realCursor.y))")
+        warpLocalCursor(to: next, reason: "local synthetic handoff")
+        syntheticHandoffPoint = next
+        return true
+    }
+
+    private func exitSyntheticHandoff(reason: String, age: CFAbsoluteTime? = nil) {
+        guard mode == .localSyntheticHandoff else { return }
+        let point = syntheticHandoffPoint ?? CGPoint(x: NSScreenFrame.main.midX, y: NSScreenFrame.main.midY)
+        let realBefore = CGEvent(source: nil)?.location ?? .zero
+        NSLog("[NoBarrierMouse.Handoff] exit reason=\(reason) age=\(age ?? 0) point=(\(point.x),\(point.y)) realCursorBeforeRestore=(\(realBefore.x),\(realBefore.y))")
+        warpLocalCursor(to: point, reason: "synthetic handoff final anchor before restore")
+        restoreLocalCursor()
+        let realAfter = CGEvent(source: nil)?.location ?? .zero
+        NSLog("[NoBarrierMouse.Handoff] afterRestore realCursor=(\(realAfter.x),\(realAfter.y))")
+        warpLocalCursor(to: point, reason: "synthetic handoff final anchor after restore")
+        setMode(.local, reason: "synthetic handoff complete: \(reason)")
+        syntheticHandoffPoint = nil
+        syntheticHandoffEventCount = 0
+        syntheticHandoffQuietCount = 0
+    }
+
+    private func exitSyntheticHandoffIfActive(reason: String) {
+        guard mode == .localSyntheticHandoff else { return }
+        let point = syntheticHandoffPoint ?? CGPoint(x: NSScreenFrame.main.midX, y: NSScreenFrame.main.midY)
+        NSLog("[NoBarrierMouse.Handoff] exit reason=\(reason) point=(\(point.x),\(point.y))")
+        syntheticHandoffPoint = nil
+        syntheticHandoffEventCount = 0
+        syntheticHandoffQuietCount = 0
+        // restoreLocalCursor called by the caller
+    }
+
     private func log(_ message: String) {
         guard debugLogging else {
             return
@@ -543,6 +682,7 @@ final class EventTap {
         lastRecoveryReason = reason
         clearPendingDelta()
         activeHandoffID = nil
+        exitSyntheticHandoffIfActive(reason: "emergency recovery")
         restoreLocalCursor()
         setMode(.local, reason: "emergency recovery: \(reason)")
         let screen = NSScreenFrame.main
