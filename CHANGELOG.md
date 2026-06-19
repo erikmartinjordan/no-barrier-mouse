@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.1](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.2.0...v0.2.1) (2026-06-19)
+
+
+### 🐛 Fixes
+
+* keep benchmark artifacts out of Desktop ([561d9bb](https://github.com/erikmartinjordan/no-barrier-mouse/commit/561d9bb6047eadcc88a2a7423bdbab0ec1992121))
+* smooth the transition between receiver and controller ([639832a](https://github.com/erikmartinjordan/no-barrier-mouse/commit/639832af2db0b1dcf7127517f6065f8c1a7b7861))
+* stabilize synthetic handoff cursor recovery ([c9d672e](https://github.com/erikmartinjordan/no-barrier-mouse/commit/c9d672e14a6d79e1cdb05b044df2a2632598f3ed))
+
 ## [0.2.0](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.1.0...v0.2.0) (2026-06-17)
 
 
