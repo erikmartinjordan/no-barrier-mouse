@@ -413,9 +413,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]) else {
             return
         }
-        let url = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Desktop")
-            .appendingPathComponent("no-barrier-mouse-status.json")
+        guard let directory = try? AppDirectories.applicationSupport(subdirectory: "Automation") else {
+            return
+        }
+        let url = directory.appendingPathComponent("no-barrier-mouse-status.json")
         try? data.write(to: url, options: .atomic)
     }
 

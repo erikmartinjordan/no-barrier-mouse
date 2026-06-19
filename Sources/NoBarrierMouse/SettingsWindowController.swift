@@ -297,7 +297,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         valueStack.setContentHuggingPriority(.required, for: .horizontal)
 
         let header = NSStackView(views: [
-            makeDescription(title: "Latest benchmark", subtitle: "Controller capture to receiver cursor application."),
+            makeDescription(title: "Latest benchmark", subtitle: "Receiver packet arrival to cursor application."),
             valueStack
         ])
         header.orientation = .horizontal
@@ -554,7 +554,6 @@ private final class LatencyStatusChartView: NSView {
             path.fill()
         }
 
-        drawScaleLabels(in: NSRect(x: chartRect.minX, y: barY + barHeight + 9, width: chartRect.width, height: 14))
     }
 
     private func drawChartLabels(in rect: NSRect, count: Int, barWidth: CGFloat, gap: CGFloat) {
@@ -564,20 +563,6 @@ private final class LatencyStatusChartView: NSView {
                 "\(index + 2)",
                 in: NSRect(x: x, y: rect.minY + 3, width: 16, height: 10),
                 font: .monospacedDigitSystemFont(ofSize: 8, weight: .bold),
-                color: .secondaryLabelColor,
-                alignment: .center
-            )
-        }
-    }
-
-    private func drawScaleLabels(in rect: NSRect) {
-        let width = rect.width / 4
-        let labels = ["Smooth", "Noticeable", "Laggy", "Spike"]
-        for (index, label) in labels.enumerated() {
-            drawText(
-                label,
-                in: NSRect(x: rect.minX + CGFloat(index) * width, y: rect.minY, width: width, height: rect.height),
-                font: .systemFont(ofSize: 10, weight: .semibold),
                 color: .secondaryLabelColor,
                 alignment: .center
             )

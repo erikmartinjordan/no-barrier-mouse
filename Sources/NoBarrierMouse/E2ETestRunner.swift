@@ -478,7 +478,7 @@ struct TestModeConfig {
         let enabled = args.contains("--test-mode")
         let cycles = max(1, intValue(after: "--test-cycles", in: args) ?? 50)
         let payloadFile = stringValue(after: "--test-payload-file", in: args) ?? "/tmp/no-barrier-mouse-e2e-payload.txt"
-        let logDirectory = stringValue(after: "--test-log-dir", in: args) ?? "\(NSHomeDirectory())/Desktop/no-barrier-mouse-test-logs"
+        let logDirectory = stringValue(after: "--test-log-dir", in: args) ?? defaultLogDirectory().path
         let autoStart = !args.contains("--test-no-autostart")
         return TestModeConfig(
             enabled: enabled,
@@ -487,6 +487,12 @@ struct TestModeConfig {
             logDirectoryURL: URL(fileURLWithPath: logDirectory),
             autoStart: autoStart
         )
+    }
+
+    private static func defaultLogDirectory() -> URL {
+        (try? AppDirectories.caches(subdirectory: "TestLogs")) ?? URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("NoBarrierMouse", isDirectory: true)
+            .appendingPathComponent("TestLogs", isDirectory: true)
     }
 
     private static func stringValue(after flag: String, in args: [String]) -> String? {

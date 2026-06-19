@@ -91,13 +91,17 @@ final class MouseBenchmarkRecorder {
 
         do {
             let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
-            let desktop = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Desktop", isDirectory: true)
-            let url = desktop.appendingPathComponent("no-barrier-mouse-\(slug(transport))-benchmark-\(id).json")
+            let directory = try benchmarkDirectory()
+            let url = directory.appendingPathComponent("no-barrier-mouse-\(slug(transport))-benchmark-\(id).json")
             try data.write(to: url, options: .atomic)
             return url
         } catch {
             return nil
         }
+    }
+
+    private func benchmarkDirectory() throws -> URL {
+        try AppDirectories.caches(subdirectory: "Benchmarks")
     }
 
     private func gaps(_ values: [Double]) -> [Double] {
