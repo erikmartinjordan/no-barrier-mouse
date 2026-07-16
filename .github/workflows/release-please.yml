@@ -14,6 +14,12 @@ permissions:
   contents: write
   pull-requests: write
 
+env:
+  APP_NAME: NoBarrierMouse
+  BUNDLE_ID: com.erikmartinjordan.NoBarrierMouse
+  TEAM_ID: FL97XCW5XD
+  NOTARY_PROFILE: NoBarrierMouseCI
+
 jobs:
   release-please:
     runs-on: ubuntu-latest
@@ -94,12 +100,60 @@ jobs:
 
           git checkout --detach "$TAG"
 
-      - name: Build app bundles
+      - name: Import Developer ID certificate
+        env:
+          DEV_ID_P12_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+          DEV_ID_P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          if [ -n "$DEV_ID_P12_BASE64" ] && [ -n "$DEV_ID_P12_PASSWORD" ]; then
+            echo "$DEV_ID_P12_BASE64" > /tmp/dev-id.p12.b64
+            KEYCHAIN_OUTPUT="$(bash scripts/import-certs-ci.sh /tmp/dev-id.p12.b64 "$DEV_ID_P12_PASSWORD")"
+            echo "$KEYCHAIN_OUTPUT"
+            CODESIGN_KEYCHAIN="$(echo "$KEYCHAIN_OUTPUT" | grep '^KEYCHAIN=' | cut -d= -f2-)"
+            echo "CODESIGN_KEYCHAIN=$CODESIGN_KEYCHAIN" >> "$GITHUB_ENV"
+            echo "Certificate imported successfully."
+          else
+            echo "WARNING: APPLE_DEVELOPER_ID_CERT_BASE64 or APPLE_DEVELOPER_ID_CERT_PASSWORD not set."
+            echo "Release will be unsigned (ad-hoc)."
+          fi
+
+      - name: Store notarization credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: FL97XCW5XD
+        run: |
+          if [ -n "$APPLE_ID" ] && [ -n "$APPLE_ID_PASSWORD" ]; then
+            xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_ID_PASSWORD"
+            echo "Notarization credentials stored."
+          else
+            echo "WARNING: APPLE_ID or APPLE_ID_PASSWORD not set. Notarization will be skipped."
+          fi
+
+      - name: Build native (Apple Silicon)
         env:
           VERSION: ${{ steps.version.outputs.version }}
           BUILD_NUMBER: ${{ github.run_number }}
+          NOTARIZE: "true"
+          NO_CODESIGN: ""  # ensure codesign runs; import-certs-ci handles keychain prep
+          NOTARY_PROFILE: ${{ env.NOTARY_PROFILE }}
         run: |
+          if [ -n "${CODESIGN_KEYCHAIN:-}" ]; then
+            security unlock-keychain -p "$(security show-keychain-info "${CODESIGN_KEYCHAIN}" 2>&1 | head -1)" "${CODESIGN_KEYCHAIN}" || true
+          fi
           ./build-app.sh
+
+      - name: Build Intel
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+          NOTARIZE: "true"
+          NO_CODESIGN: ""
+          NOTARY_PROFILE: ${{ env.NOTARY_PROFILE }}
+        run: |
           ./build-app.sh intel
 
       - name: Package release assets

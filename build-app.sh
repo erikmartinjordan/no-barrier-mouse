@@ -6,10 +6,25 @@ VERSION="${VERSION:-0.0.1}"
 BUILD_NUMBER="${BUILD_NUMBER:-1}"
 ICON_SRC="assets/NoBarrierMouse.icns"
 DEFAULT_CODESIGN_ENV="$HOME/Library/Application Support/NoBarrierMouse/codesign-env.sh"
+ENTITLEMENTS="NoBarrierMouse.entitlements"
+NOTARY_PROFILE="${NOTARY_PROFILE:-NoBarrierMouse}"
 
 if [ -f "$DEFAULT_CODESIGN_ENV" ]; then
   # shellcheck disable=SC1090
   . "$DEFAULT_CODESIGN_ENV"
+fi
+
+# Auto-detect Developer ID identity when notarizing
+if [ "${NOTARIZE:-false}" = "true" ]; then
+  DEV_ID="$(security find-identity -v -p basic 2>/dev/null | grep "Developer ID Application" | head -1 | sed 's/.*"\(.*\)".*/\1/' || true)"
+  if [ -n "$DEV_ID" ]; then
+    CODESIGN_IDENTITY="$DEV_ID"
+    echo "Using Developer ID identity: $CODESIGN_IDENTITY" >&2
+  else
+    echo "ERROR: NOTARIZE=true but no Developer ID Application certificate found." >&2
+    echo "Run 'security find-identity -v -p basic' to check your certificates." >&2
+    exit 1
+  fi
 fi
 
 if [ ! -f "$ICON_SRC" ]; then
@@ -81,6 +96,9 @@ cat > "$CONTENTS/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# Determine signing strategy
+DO_NOTARIZE=false
+
 if [ "${NO_CODESIGN:-0}" = "1" ]; then
   echo "Skipping codesign because NO_CODESIGN=1" >&2
 elif command -v codesign >/dev/null 2>&1; then
@@ -89,34 +107,85 @@ elif command -v codesign >/dev/null 2>&1; then
   fi
 
   if [ -n "${CODESIGN_IDENTITY:-}" ]; then
+    # Check if this is a Developer ID (notarizable distribution identity)
+    case "$CODESIGN_IDENTITY" in
+      *"Developer ID Application"*)
+        DO_NOTARIZE=${NOTARIZE:-true}
+        SIGN_FLAGS="--force --deep --timestamp --options=runtime"
+        if [ -n "${CODESIGN_KEYCHAIN:-}" ]; then
+          SIGN_FLAGS="$SIGN_FLAGS --keychain $CODESIGN_KEYCHAIN"
+        fi
+        if [ -f "$ENTITLEMENTS" ]; then
+          SIGN_FLAGS="$SIGN_FLAGS --entitlements $ENTITLEMENTS"
+        fi
+        ;;
+      *)
+        SIGN_FLAGS="--force --deep --timestamp=none"
+        if [ -n "${CODESIGN_KEYCHAIN:-}" ]; then
+          SIGN_FLAGS="$SIGN_FLAGS --keychain $CODESIGN_KEYCHAIN"
+        fi
+        ;;
+    esac
+
     SIGN_LOG="$(mktemp "${TMPDIR:-/tmp}/nobarrier-codesign.XXXXXX")"
-    if [ -n "${CODESIGN_KEYCHAIN:-}" ]; then
-      if codesign --force --deep --timestamp=none --keychain "$CODESIGN_KEYCHAIN" --sign "$CODESIGN_IDENTITY" "$APP" 2>"$SIGN_LOG"; then
-        echo "Signed with stable identity: $CODESIGN_IDENTITY" >&2
-        rm -f "$SIGN_LOG"
-        echo "$APP"
-        exit 0
+    if codesign $SIGN_FLAGS --sign "$CODESIGN_IDENTITY" "$APP" 2>"$SIGN_LOG"; then
+      echo "Signed with identity: $CODESIGN_IDENTITY" >&2
+      rm -f "$SIGN_LOG"
+    else
+      echo "WARNING: codesign failed for identity: $CODESIGN_IDENTITY" >&2
+      cat "$SIGN_LOG" >&2
+      rm -f "$SIGN_LOG"
+      echo "Falling back to ad-hoc signing..." >&2
+      codesign --force --deep --sign - "$APP"
+    fi
+  else
+    codesign --force --deep --sign - "$APP"
+    echo "WARNING: signed ad-hoc. macOS may ask for Accessibility/Input Monitoring again after each rebuild." >&2
+    if [ -f "$DEFAULT_CODESIGN_ENV" ]; then
+      echo "Run scripts/create-local-codesign-identity.sh --trust and approve the macOS prompt once." >&2
+    else
+      echo "Run scripts/create-local-codesign-identity.sh once to create a stable local signing identity." >&2
+    fi
+  fi
+fi
+
+# Notarization
+if [ "$DO_NOTARIZE" = "true" ]; then
+  echo "Submitting for notarization (profile: $NOTARY_PROFILE)..." >&2
+  ZIP_PATH="$(mktemp "${TMPDIR:-/tmp}/nobarrier-notarize.XXXXXX").zip"
+  ditto -c -k --keepParent "$APP" "$ZIP_PATH"
+
+  SUBMISSION_LOG="$(mktemp "${TMPDIR:-/tmp}/nobarrier-submission.XXXXXX")"
+  if xcrun notarytool submit "$ZIP_PATH" \
+    --keychain-profile "$NOTARY_PROFILE" \
+    --wait \
+    --output-format plist \
+    > "$SUBMISSION_LOG" 2>&1; then
+    echo "Notarization submitted successfully." >&2
+    rm -f "$ZIP_PATH"
+
+    # Check status
+    STATUS=$(plutil -extract "status" raw - < "$SUBMISSION_LOG" 2>/dev/null || echo "unknown")
+    echo "Notarization status: $STATUS" >&2
+
+    if [ "$STATUS" = "Accepted" ]; then
+      echo "Stapling notarization ticket..." >&2
+      if xcrun stapler staple "$APP"; then
+        echo "Notarization ticket stapled." >&2
+      else
+        echo "WARNING: stapling failed." >&2
       fi
     else
-      if codesign --force --deep --timestamp=none --sign "$CODESIGN_IDENTITY" "$APP" 2>"$SIGN_LOG"; then
-        echo "Signed with stable identity: $CODESIGN_IDENTITY" >&2
-        rm -f "$SIGN_LOG"
-        echo "$APP"
-        exit 0
-      fi
+      echo "WARNING: notarization was not accepted (status=$STATUS)." >&2
+      echo "Full output:" >&2
+      cat "$SUBMISSION_LOG" >&2
     fi
-    echo "WARNING: stable codesign failed for identity: $CODESIGN_IDENTITY" >&2
-    cat "$SIGN_LOG" >&2
-    rm -f "$SIGN_LOG"
-  fi
-
-  codesign --force --deep --sign - "$APP"
-  echo "WARNING: signed ad-hoc. macOS may ask for Accessibility/Input Monitoring again after each rebuild." >&2
-  if [ -f "$DEFAULT_CODESIGN_ENV" ]; then
-    echo "Run scripts/create-local-codesign-identity.sh --trust and approve the macOS prompt once." >&2
   else
-    echo "Run scripts/create-local-codesign-identity.sh once to create a stable local signing identity." >&2
+    echo "WARNING: notarytool submission failed." >&2
+    cat "$SUBMISSION_LOG" >&2
+    rm -f "$ZIP_PATH"
   fi
+  rm -f "$SUBMISSION_LOG"
 fi
 
 echo "$APP"
