@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.2.1...v0.2.2) (2026-10-01)
+
+
+### 🐛 Fixes
+
+* restore AirDrop when NoBarrierMouse is not receiving ([3bed6c8](https://github.com/erikmartinjordan/no-barrier-mouse/commit/3bed6c86a0e73a757599a960736915a0d9169b7d))
+
 ## [0.2.1](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.2.0...v0.2.1) (2026-06-19)
 
 
