@@ -9,6 +9,10 @@ enum AirDropLatencyMode {
         set { UserDefaults.standard.set(newValue, forKey: defaultsKey) }
     }
 
+    static var hasPendingRestore: Bool {
+        UserDefaults.standard.string(forKey: previousDiscoverableModeKey) != nil
+    }
+
     static var isAirDropOff: Bool {
         if let disabled = readDefaults(arguments: ["read", "com.apple.NetworkBrowser", "DisableAirDrop"])?.lowercased(),
            disabled == "1" || disabled == "yes" || disabled == "true" {
@@ -18,10 +22,12 @@ enum AirDropLatencyMode {
     }
 
     static func apply(disabled: Bool) {
+        let wasOff = isAirDropOff
         if disabled {
             if UserDefaults.standard.string(forKey: previousDiscoverableModeKey) == nil,
                let current = readDefaults(arguments: ["read", "com.apple.sharingd", "DiscoverableMode"]),
-               !current.isEmpty {
+               !current.isEmpty,
+               current != "Off" {
                 UserDefaults.standard.set(current, forKey: previousDiscoverableModeKey)
             }
             runDefaults(arguments: ["write", "com.apple.NetworkBrowser", "DisableAirDrop", "-bool", "YES"])
@@ -30,8 +36,25 @@ enum AirDropLatencyMode {
             runDefaults(arguments: ["write", "com.apple.NetworkBrowser", "DisableAirDrop", "-bool", "NO"])
             if let previous = UserDefaults.standard.string(forKey: previousDiscoverableModeKey), !previous.isEmpty {
                 runDefaults(arguments: ["write", "com.apple.sharingd", "DiscoverableMode", previous])
-                UserDefaults.standard.removeObject(forKey: previousDiscoverableModeKey)
             }
+            UserDefaults.standard.removeObject(forKey: previousDiscoverableModeKey)
+        }
+        if wasOff != disabled {
+            restartSharingd()
+        }
+    }
+
+    private static func restartSharingd() {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+        process.arguments = ["sharingd"]
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return
         }
     }
 

@@ -42,6 +42,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+
+        if AirDropLatencyMode.hasPendingRestore {
+            AirDropLatencyMode.apply(disabled: false)
+        }
+
         setupStatusItem()
         wireComponents()
         registerBenchmarkAutomation()
@@ -71,6 +76,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             showRoleSelection()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        AirDropLatencyMode.apply(disabled: false)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
