@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let network = PeerNetwork()
     private let eventTap = EventTap()
     private let remoteInput = RemoteInput()
+    private let sleepPreventer = IdleSleepPreventer()
     private let roleSelectionController = RoleSelectionController()
     private lazy var settingsController = SettingsWindowController()
     private let savedRoleStore = SavedRoleStore()
@@ -79,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        sleepPreventer.stop()
         AirDropLatencyMode.apply(disabled: false)
     }
 
@@ -450,6 +452,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         network.start(role: role)
         AirDropLatencyMode.apply(disabled: AirDropLatencyMode.isEnabled && role == .receiver)
+        sleepPreventer.start()
         updateAppearance()
         e2eTest.startTortureIfNeeded(trigger: "turnOn")
     }
@@ -475,6 +478,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         benchmarkTimer?.cancel()
         benchmarkTimer = nil
         AirDropLatencyMode.apply(disabled: false)
+        sleepPreventer.stop()
         eventTap.stop()
         remoteInput.reset()
         network.stop()
