@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.3.0...v0.4.0) (2026-10-05)
+
+
+### ✨ Features
+
+* add keep-awake toggle in settings and show app version ([6b49e05](https://github.com/erikmartinjordan/no-barrier-mouse/commit/6b49e055cf022f8506df0e3adb667e50f5d77eaa))
+
 ## [0.3.0](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.2.2...v0.3.0) (2026-10-05)
 
 
