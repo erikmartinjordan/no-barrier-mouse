@@ -1,6 +1,26 @@
 import Foundation
 import IOKit.pwr_mgt
 
+struct SleepPreventionPreference {
+    static let defaultsKey = "PreventIdleSleep"
+
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    var isEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Self.defaultsKey) != nil else { return true }
+            return defaults.bool(forKey: Self.defaultsKey)
+        }
+        nonmutating set {
+            defaults.set(newValue, forKey: Self.defaultsKey)
+        }
+    }
+}
+
 final class IdleSleepPreventer {
     private var displayAssertionID: IOPMAssertionID = 0
     private var systemAssertionID: IOPMAssertionID = 0

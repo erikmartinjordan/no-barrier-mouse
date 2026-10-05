@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let eventTap = EventTap()
     private let remoteInput = RemoteInput()
     private let sleepPreventer = IdleSleepPreventer()
+    private let sleepPreference = SleepPreventionPreference()
     private let roleSelectionController = RoleSelectionController()
     private lazy var settingsController = SettingsWindowController()
     private let savedRoleStore = SavedRoleStore()
@@ -20,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var role: AppRole?
     private var accessibilityProblem = false
     private var inputMonitoringProblem = false
+    private var preventSleepEnabled = true
     private var state: ConnectionState = .off {
         didSet { updateAppearance() }
     }
@@ -43,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        preventSleepEnabled = sleepPreference.isEnabled
 
         if AirDropLatencyMode.hasPendingRestore {
             AirDropLatencyMode.apply(disabled: false)
@@ -65,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 connectionState: .connected,
                 airDropLatencyModeEnabled: previewRole == .receiver,
                 airDropIsOff: previewRole == .receiver,
+                preventSleepEnabled: true,
                 previewLatency: previewRole == .receiver ? previewLatencySnapshot() : nil
             ))
             return
@@ -236,6 +240,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         settingsController.onAirDropLatencyModeChanged = { [weak self] enabled in
             self?.setAirDropLatencyMode(enabled)
+        }
+        settingsController.onPreventSleepChanged = { [weak self] enabled in
+            self?.setPreventSleepEnabled(enabled)
         }
         settingsController.onRunBenchmark = { [weak self] in
             guard self?.role == .receiver else { return }
@@ -452,7 +459,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         network.start(role: role)
         AirDropLatencyMode.apply(disabled: AirDropLatencyMode.isEnabled && role == .receiver)
-        sleepPreventer.start()
+        if preventSleepEnabled {
+            sleepPreventer.start()
+        } else {
+            sleepPreventer.stop()
+        }
         updateAppearance()
         e2eTest.startTortureIfNeeded(trigger: "turnOn")
     }
@@ -579,13 +590,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateSettingsPanel()
     }
 
+    private func setPreventSleepEnabled(_ enabled: Bool) {
+        preventSleepEnabled = enabled
+        sleepPreference.isEnabled = enabled
+        if isOn && enabled {
+            sleepPreventer.start()
+        } else {
+            sleepPreventer.stop()
+        }
+        updateSettingsPanel()
+    }
+
     private func updateSettingsPanel() {
         settingsController.update(state: SettingsPanelState(
             role: role,
             isOn: isOn,
             connectionState: state,
             airDropLatencyModeEnabled: AirDropLatencyMode.isEnabled,
-            airDropIsOff: AirDropLatencyMode.isAirDropOff
+            airDropIsOff: AirDropLatencyMode.isAirDropOff,
+            preventSleepEnabled: preventSleepEnabled
         ))
     }
 

@@ -6,6 +6,7 @@ struct SettingsPanelState {
     let connectionState: ConnectionState
     let airDropLatencyModeEnabled: Bool
     let airDropIsOff: Bool
+    let preventSleepEnabled: Bool
     let previewLatency: EndToEndLatencySnapshot?
 
     init(
@@ -14,6 +15,7 @@ struct SettingsPanelState {
         connectionState: ConnectionState,
         airDropLatencyModeEnabled: Bool,
         airDropIsOff: Bool,
+        preventSleepEnabled: Bool,
         previewLatency: EndToEndLatencySnapshot? = nil
     ) {
         self.role = role
@@ -21,6 +23,7 @@ struct SettingsPanelState {
         self.connectionState = connectionState
         self.airDropLatencyModeEnabled = airDropLatencyModeEnabled
         self.airDropIsOff = airDropIsOff
+        self.preventSleepEnabled = preventSleepEnabled
         self.previewLatency = previewLatency
     }
 }
@@ -31,20 +34,22 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         static let labelWidth: CGFloat = 138
         static let rowGap: CGFloat = 22
         static let contentWidth = rowWidth - labelWidth - rowGap
-        static let controllerHeight: CGFloat = 300
-        static let receiverHeight: CGFloat = 580
+        static let controllerHeight: CGFloat = 380
+        static let receiverHeight: CGFloat = 660
         static let controllerTopInset: CGFloat = 44
         static let receiverTopInset: CGFloat = 72
     }
 
     var onRoleSelected: ((AppRole) -> Void)?
     var onAirDropLatencyModeChanged: ((Bool) -> Void)?
+    var onPreventSleepChanged: ((Bool) -> Void)?
     var onRunBenchmark: (() -> Void)?
 
     private let roleControl = NSSegmentedControl(labels: ["Controller", "Receiver"], trackingMode: .selectOne, target: nil, action: nil)
     private let applyRoleButton = NSButton(title: "Apply", target: nil, action: nil)
     private let airDropSwitch = NSSwitch()
     private let airDropStatusLabel = NSTextField(labelWithString: "AirDrop On")
+    private let preventSleepSwitch = NSSwitch()
     private let benchmarkButton = NSButton(title: "Run", target: nil, action: nil)
     private let latencyChart = LatencyStatusChartView(frame: .zero)
     private let latencyValueLabel = NSTextField(labelWithString: "-")
@@ -59,7 +64,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var stackTopConstraint: NSLayoutConstraint?
     private var refreshTimer: Timer?
     private var didCenterWindow = false
-    private var state = SettingsPanelState(role: nil, isOn: false, connectionState: .off, airDropLatencyModeEnabled: false, airDropIsOff: false)
+    private var state = SettingsPanelState(role: nil, isOn: false, connectionState: .off, airDropLatencyModeEnabled: false, airDropIsOff: false, preventSleepEnabled: true)
 
     init() {
         let content = NSVisualEffectView()
@@ -117,6 +122,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             }
         }()
         airDropSwitch.state = state.airDropLatencyModeEnabled ? .on : .off
+        preventSleepSwitch.state = state.preventSleepEnabled ? .on : .off
         benchmarkButton.isEnabled = state.connectionState == .connected && state.role == .receiver
         subtitleLabel.stringValue = subtitle(for: state)
         updateAirDropStatus()
@@ -151,16 +157,27 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         title.alignment = .left
         title.lineBreakMode = .byTruncatingTail
 
+        let version = NSTextField(labelWithString: appVersionLabel())
+        version.font = .systemFont(ofSize: 11, weight: .semibold)
+        version.textColor = .tertiaryLabelColor
+        version.setContentHuggingPriority(.required, for: .horizontal)
+
+        let titleRow = NSStackView(views: [title, version])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .lastBaseline
+        titleRow.spacing = 8
+
         subtitleLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         subtitleLabel.textColor = .secondaryLabelColor
         subtitleLabel.alignment = .left
 
-        let header = NSStackView(views: [title, subtitleLabel])
+        let header = NSStackView(views: [titleRow, subtitleLabel])
         header.orientation = .vertical
         header.spacing = 5
         header.alignment = .leading
         header.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 30, right: 0)
 
+        let powerRow = makePowerRow()
         let airDropRow = makeAirDropRow()
         let benchmarkRow = makeBenchmarkRow()
         let latencyRow = makeLatencyRow()
@@ -169,6 +186,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
         stack.addArrangedSubview(header)
         stack.addArrangedSubview(makeRow(label: "Role", content: makeRoleControls()))
+        stack.addArrangedSubview(powerRow)
         stack.addArrangedSubview(airDropRow)
         stack.addArrangedSubview(benchmarkRow)
         stack.addArrangedSubview(latencyRow)
@@ -218,6 +236,34 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         ])
 
         return container
+    }
+
+    private func makePowerRow() -> NSView {
+        let container = NSView()
+        container.translatesAutoresizingMaskIntoConstraints = false
+        preventSleepSwitch.controlSize = .small
+        preventSleepSwitch.translatesAutoresizingMaskIntoConstraints = false
+        preventSleepSwitch.setContentHuggingPriority(.required, for: .horizontal)
+        let description = makeDescription(
+            title: "Keep this Mac awake",
+            subtitle: "Prevents the display and system from sleeping while NoBarrierMouse is active."
+        )
+        description.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(description)
+        container.addSubview(preventSleepSwitch)
+
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: Layout.contentWidth),
+            container.heightAnchor.constraint(greaterThanOrEqualToConstant: 40),
+            description.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            description.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            description.trailingAnchor.constraint(lessThanOrEqualTo: preventSleepSwitch.leadingAnchor, constant: -14),
+            preventSleepSwitch.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            preventSleepSwitch.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+
+        return makeRow(label: "Power", content: container)
     }
 
     private func makeAirDropRow() -> NSView {
@@ -401,6 +447,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         benchmarkButton.action = #selector(runBenchmark)
         airDropSwitch.target = self
         airDropSwitch.action = #selector(toggleAirDropLatencyMode)
+        preventSleepSwitch.target = self
+        preventSleepSwitch.action = #selector(togglePreventSleep)
     }
 
     @objc private func applyRole() {
@@ -420,6 +468,10 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     @objc private func toggleAirDropLatencyMode() {
         onAirDropLatencyModeChanged?(airDropSwitch.state == .on)
+    }
+
+    @objc private func togglePreventSleep() {
+        onPreventSleepChanged?(preventSleepSwitch.state == .on)
     }
 
     private func startRefreshTimer() {
@@ -506,6 +558,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case .connected:
             return "\(role) · Connected"
         }
+    }
+
+    private func appVersionLabel() -> String {
+        guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              !version.isEmpty else {
+            return "dev"
+        }
+        return "v\(version)"
     }
 }
 
