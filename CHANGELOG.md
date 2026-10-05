@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.2.2...v0.3.0) (2026-10-05)
+
+
+### ✨ Features
+
+* keep both Macs awake while NoBarrierMouse is active ([1a1aa23](https://github.com/erikmartinjordan/no-barrier-mouse/commit/1a1aa23afe89b13c8dbd1cd03d99d33b963efdaf))
+
 ## [0.2.2](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.2.1...v0.2.2) (2026-10-01)
 
 
