@@ -193,6 +193,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if state != .connected, state != .connecting {
                 self.eventTap.releaseLocalControl()
             }
+            self.updateSleepPrevention()
         }
         network.onMessage = { [weak self] message, receivedAt in
             self?.handleNetworkMessage(message, receivedAt: receivedAt)
@@ -459,11 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         network.start(role: role)
         AirDropLatencyMode.apply(disabled: AirDropLatencyMode.isEnabled && role == .receiver)
-        if preventSleepEnabled {
-            sleepPreventer.start()
-        } else {
-            sleepPreventer.stop()
-        }
+        updateSleepPrevention()
         updateAppearance()
         e2eTest.startTortureIfNeeded(trigger: "turnOn")
     }
@@ -593,12 +590,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setPreventSleepEnabled(_ enabled: Bool) {
         preventSleepEnabled = enabled
         sleepPreference.isEnabled = enabled
-        if isOn && enabled {
+        updateSleepPrevention()
+        updateSettingsPanel()
+    }
+
+    private func updateSleepPrevention() {
+        if isOn, preventSleepEnabled, state == .connected {
             sleepPreventer.start()
         } else {
             sleepPreventer.stop()
         }
-        updateSettingsPanel()
     }
 
     private func updateSettingsPanel() {
