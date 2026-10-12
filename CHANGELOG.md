@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.4.0...v0.4.1) (2026-10-12)
+
+
+### 🐛 Fixes
+
+* keep Macs awake only while both peers are connected ([8a17e9c](https://github.com/erikmartinjordan/no-barrier-mouse/commit/8a17e9c83cbd283efdd09ca8b573363ce71b1b5a))
+
 ## [0.4.0](https://github.com/erikmartinjordan/no-barrier-mouse/compare/v0.3.0...v0.4.0) (2026-10-05)
 
 
